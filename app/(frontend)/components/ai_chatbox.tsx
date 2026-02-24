@@ -68,7 +68,7 @@ export default function AiChatbox({
       const prompt = promptMap[task];
       if (prompt) {
         sendMessage({ text: prompt });
-        router.replace("/frontend", { scroll: false });
+        router.replace("/", { scroll: false });
       }
     }
   }, [searchParams, sendMessage, router]);

@@ -8,7 +8,7 @@ export function useAuth() {
   const [error, setError] = useState("");
 
   const handleRouting = () => {
-    router.push("/frontend");
+    router.push("/");
     router.refresh();
   };
 
@@ -20,6 +20,7 @@ export function useAuth() {
       email,
       password,
     });
+    console.log("Full response from NextAuth:", res);
     if (res?.error) {
       setError("Invalid email or password");
       setLoading(false);

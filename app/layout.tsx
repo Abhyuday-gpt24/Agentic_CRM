@@ -3,7 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 
 // 1. Import your new widget
-import FloatingChatWidget from "./frontend/components/floating_chat_widget";
+import FloatingChatWidget from "./(frontend)/components/floating_chat_widget";
 
 const inter = Inter({ subsets: ["latin"] });
 

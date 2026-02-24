@@ -20,6 +20,7 @@ export const authOptions: NextAuthOptions = {
         otp: { label: "OTP", type: "text" },
       },
       async authorize(credentials) {
+        console.log("Login attempt for:", credentials?.email);
         if (!credentials?.email) return null;
 
         // 1. Handle OTP Login Flow

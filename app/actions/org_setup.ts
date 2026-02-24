@@ -45,5 +45,5 @@ export async function createOrganization(formData: FormData) {
   });
 
   // 4. Tell Next.js to refresh the layout and remove the setup screen
-  revalidatePath("/frontend");
+  revalidatePath("/");
 }

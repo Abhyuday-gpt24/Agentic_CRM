@@ -6,7 +6,7 @@ export default function LoginButton() {
   return (
     <button
       // We trigger the Google provider and tell NextAuth to send them to the SPA on success
-      onClick={() => signIn("google", { callbackUrl: "/frontend" })}
+      onClick={() => signIn("google", { callbackUrl: "/" })}
       className="w-full flex items-center justify-center gap-3 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-sm"
     >
       <svg className="w-5 h-5 bg-white rounded-full p-0.5" viewBox="0 0 24 24">
