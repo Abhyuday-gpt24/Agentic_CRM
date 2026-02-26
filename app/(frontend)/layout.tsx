@@ -1,34 +1,28 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../api/auth/[...nextauth]/route";
 import { redirect } from "next/navigation";
-import { prisma } from "../lib/prisma"; // Adjust path if necessary
-import Sidebar from "./components/sidebar"; // Your client component sidebar
-import Header from "./components/header"; // Your client component header
-import OrgSetup from "./components/onboarding/org_setup"; // Your onboarding component
+import { prisma } from "../lib/prisma";
+import Sidebar from "./components/sidebar";
+import Header from "./components/header";
+import OrgSetup from "./components/onboarding/org_setup";
 import FloatingWidget from "./components/floating_chat_widget";
+import { Providers } from "./providers"; // 🚨 Use the new unified provider
 
 export default async function FrontendLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // 1. Session Protection
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    redirect("/login");
-  }
+  if (!session?.user?.email) redirect("/");
 
-  // 2. Fetch User & Org Data
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { organization: true },
   });
 
-  if (!dbUser) {
-    redirect("/login");
-  }
+  if (!dbUser) redirect("/");
 
-  // 3. THE INTERCEPTOR: Force Org Setup if missing
   if (!dbUser.organizationId) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
@@ -37,23 +31,22 @@ export default async function FrontendLayout({
     );
   }
 
-  // 4. THE AUTHENTICATED SHELL
   return (
-    <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
-      {/* Client Component Sidebar */}
-      <Sidebar
-        orgName={dbUser.organization?.name}
-        userName={dbUser.name || "User"}
-      />
+    <Providers session={session}>
+      {" "}
+      {/* 🚨 Hydrating the Client Context with SSR data */}
+      <div className="flex h-screen bg-slate-100 overflow-hidden font-sans">
+        <Sidebar
+          orgName={dbUser.organization?.name}
+          userName={dbUser.name || "User"}
+        />
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Global Top Header */}
-        <Header />
-
-        {/* Dynamic Page Content (This is where page.tsx loads) */}
-        <main className="flex-1 overflow-y-auto pb-10">{children}</main>
-        <FloatingWidget />
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          <Header />
+          <main className="flex-1 overflow-y-auto pb-10">{children}</main>
+          <FloatingWidget />
+        </div>
       </div>
-    </div>
+    </Providers>
   );
 }

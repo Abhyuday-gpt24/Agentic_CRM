@@ -5,30 +5,87 @@ import { authOptions } from "../api/auth/[...nextauth]/route";
 import { prisma } from "../lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { ContactType, User } from "@prisma/client";
+// 🚨 Import the centralized type
+import { AuthUserWithTeam } from "../lib/rbac_helpers";
 
-export async function createContact(formData: FormData) {
+// ==========================================
+// SECURITY HELPERS
+// ==========================================
+
+async function getAuthenticatedUser(): Promise<AuthUserWithTeam> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) throw new Error("Unauthorized");
 
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
+    include: { teamMembers: true },
   });
 
-  if (!dbUser || !dbUser.organizationId)
+  if (!dbUser || !dbUser.organizationId) {
     throw new Error("No organization found");
+  }
 
-  // Extract form data
+  return dbUser as AuthUserWithTeam;
+}
+
+async function verifyContactAccess(
+  contactId: string,
+  currentUser: AuthUserWithTeam,
+) {
+  const targetContact = await prisma.contact.findUnique({
+    where: {
+      id: contactId,
+      organizationId: currentUser.organizationId,
+    },
+  });
+
+  if (!targetContact) throw new Error("Contact not found.");
+
+  // 👑 ADMINS: Full Access
+  if (currentUser.role === "ADMIN") return targetContact;
+
+  // 👔 MANAGERS: Own + Team
+  if (currentUser.role === "MANAGER") {
+    const validTeamIds = currentUser.teamMembers.map((m: User) => m.id);
+    if (
+      targetContact.employeeId !== currentUser.id &&
+      !validTeamIds.includes(targetContact.employeeId)
+    ) {
+      throw new Error(
+        "Security Violation: Access denied to team-external record.",
+      );
+    }
+    return targetContact;
+  }
+
+  // 💼 EMPLOYEES: Own Only
+  if (targetContact.employeeId !== currentUser.id) {
+    throw new Error(
+      "Security Violation: You can only modify your own contacts.",
+    );
+  }
+
+  return targetContact;
+}
+
+// ==========================================
+// CONTACT ACTIONS
+// ==========================================
+
+export async function createContact(formData: FormData) {
+  const dbUser = await getAuthenticatedUser();
+
   const name = formData.get("name") as string;
   const email = formData.get("email") as string;
   const companyId = formData.get("companyId") as string;
-  const context = formData.get("context") as string; // <-- Catch the new field
+  const context = formData.get("context") as string;
 
-  // Create the new Client
-  await prisma.client.create({
+  await prisma.contact.create({
     data: {
       name,
       email,
-      companyId: companyId || null, // 🚨 SAVING THE RELATION
+      companyId: companyId || null,
       relationshipContext: context || null,
       status: "ACTIVE",
       employeeId: dbUser.id,
@@ -36,38 +93,22 @@ export async function createContact(formData: FormData) {
     },
   });
 
-  // Refresh the table and redirect
   revalidatePath("/contacts");
   redirect("/contacts");
 }
 
-// Add this below your createContact function
-
 export async function updateContact(id: string, formData: FormData) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) throw new Error("Unauthorized");
+  const dbUser = await getAuthenticatedUser();
+  await verifyContactAccess(id, dbUser);
 
-  const dbUser = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  });
-
-  if (!dbUser || !dbUser.organizationId)
-    throw new Error("No organization found");
-
-  // Extract form data
   const name = formData.get("name") as string;
   const email = formData.get("email") as string;
   const companyId = formData.get("companyId") as string;
   const context = formData.get("context") as string;
-  const status = formData.get("status") as string; // We'll add a status dropdown to the edit form
+  const status = formData.get("status") as string;
 
-  // Update the Client in the database
-  // We use a composite where clause to ensure they can only edit clients in their Org
-  await prisma.client.update({
-    where: {
-      id: id,
-      organizationId: dbUser.organizationId, // Security check
-    },
+  await prisma.contact.update({
+    where: { id: id },
     data: {
       name,
       email,
@@ -77,27 +118,38 @@ export async function updateContact(id: string, formData: FormData) {
     },
   });
 
-  // Refresh the table and redirect
   revalidatePath("/contacts");
   redirect("/contacts");
 }
 
 export async function deleteContact(id: string) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) throw new Error("Unauthorized");
+  const dbUser = await getAuthenticatedUser();
+  await verifyContactAccess(id, dbUser);
 
-  const dbUser = await prisma.user.findUnique({
-    where: { email: session.user.email },
+  await prisma.contact.delete({
+    where: { id: id },
   });
-  if (!dbUser || !dbUser.organizationId) throw new Error("Unauthorized");
 
-  await prisma.client.delete({
-    where: {
-      id: id,
-      organizationId: dbUser.organizationId, // Security check
+  revalidatePath("/contacts");
+  redirect("/contacts");
+}
+
+export async function convertLeadToContact(
+  contactId: string,
+  targetCompanyId?: string,
+) {
+  const dbUser = await getAuthenticatedUser();
+  await verifyContactAccess(contactId, dbUser);
+
+  await prisma.contact.update({
+    where: { id: contactId },
+    data: {
+      type: ContactType.CONTACT,
+      ...(targetCompanyId && { companyId: targetCompanyId }),
     },
   });
 
+  revalidatePath("/leads");
   revalidatePath("/contacts");
   redirect("/contacts");
 }

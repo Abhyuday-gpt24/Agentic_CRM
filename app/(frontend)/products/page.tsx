@@ -8,7 +8,7 @@ import { deleteProduct } from "../../actions/product_action";
 
 export default async function ProductsPage() {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  if (!session?.user?.email) redirect("/");
 
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },

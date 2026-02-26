@@ -1,198 +1,186 @@
 import React from "react";
+import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "../../api/auth/[...nextauth]/route";
+import { prisma } from "../../lib/prisma";
+import MetricCard from "../components/metric_card";
+import RecentDeals from "../components/recent_deals";
+import UpcomingTasks from "../components/upcoming_tasks";
+import { User, Prisma } from "@prisma/client";
+import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
 
-export default function Dashboard() {
+// ==========================================
+// 1. STRICT TYPES & RBAC LOGIC
+// ==========================================
+
+type AuthUserWithTeam = Omit<User, "organizationId"> & {
+  organizationId: string;
+  teamMembers: User[];
+};
+
+async function getDashboardData(dbUser: AuthUserWithTeam) {
+  // 🚨 1. Get the dynamic ownership filter from our central utility
+  const ownershipFilter = getSecureOwnershipFilter(dbUser);
+
+  // 🚨 2. Execute both queries simultaneously for maximum performance
+  return await Promise.all([
+    prisma.deal.findMany({
+      where: {
+        organizationId: dbUser.organizationId,
+        ...ownershipFilter, // Instantly secures the deals query
+      },
+      include: { company: { select: { name: true } } },
+      orderBy: { updatedAt: "desc" },
+    }),
+
+    prisma.task.findMany({
+      where: {
+        organizationId: dbUser.organizationId,
+        isCompleted: false, // Dashboard only cares about pending tasks
+        ...ownershipFilter, // Instantly secures the tasks query
+      },
+      include: {
+        contact: { select: { name: true } },
+        assignedTo: { select: { name: true } },
+      },
+      orderBy: { dueDate: "asc" },
+      take: 5,
+    }),
+  ]);
+}
+
+// ==========================================
+// 2. MAIN PAGE COMPONENT
+// ==========================================
+export default async function DashboardPage() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) redirect("/");
+
+  // Fetch User & Team (Required for Manager RBAC)
+  const dbUser = await prisma.user.findUnique({
+    where: { email: session.user.email },
+    include: { teamMembers: true },
+  });
+
+  if (!dbUser || !dbUser.organizationId) redirect("/setup");
+
+  // Cast to strict type
+  const authUser = dbUser as AuthUserWithTeam;
+
+  // Fetch securely filtered data
+  const [deals, tasks] = await getDashboardData(authUser);
+
+  // Business Logic Calculations
+  const activeDeals = deals.filter(
+    (d) => d.stage !== "WON" && d.stage !== "LOST",
+  );
+  const pipelineValue = activeDeals.reduce((sum, deal) => sum + deal.amount, 0);
+  const wonDeals = deals.filter((d) => d.stage === "WON");
+  const revenueValue = wonDeals.reduce((sum, deal) => sum + deal.amount, 0);
+
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const firstName = session.user.name?.split(" ")[0] || "there";
+
   return (
-    <div className="p-6 md:p-8 space-y-6 w-full max-w-7xl mx-auto text-slate-200">
-      {/* TOP ROW: KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Sales Card */}
-        <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 flex flex-col justify-between h-40">
-          <h3 className="text-sm font-medium text-slate-300">
-            Sales This Month
-          </h3>
-          <div className="flex items-end justify-between">
-            <span className="text-4xl font-bold text-emerald-400">$14,500</span>
-            <span className="text-emerald-400 text-sm font-semibold flex items-center gap-1 mb-1">
-              ↑ 12%
-            </span>
-          </div>
+    <div className="p-6 md:p-8 max-w-[1600px] mx-auto w-full animate-in fade-in duration-500">
+      {/* DASHBOARD HEADER */}
+      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl  font-bold mb-1 text-foreground">
+            {greeting}, {firstName}.
+          </h1>
+          <p className=" text-slate-600">
+            Here is what is happening in your workspace today.
+          </p>
         </div>
-
-        {/* Deals Card */}
-        <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 flex flex-col justify-between h-40 relative">
-          <h3 className="text-sm font-medium text-slate-300">
-            Active Deals (This Week)
-          </h3>
-          <div className="flex items-baseline gap-2 mt-4">
-            <span className="text-4xl font-bold text-white">24</span>
-            <span className="text-slate-400 text-sm">
-              Deals
-              <br />/ $85,000
-            </span>
-          </div>
-          <span className="absolute bottom-6 right-6 text-2xl font-bold text-red-400">
-            18
-          </span>
-        </div>
-
-        {/* Tasks Card */}
-        <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 flex flex-col justify-between h-40 relative">
-          <h3 className="text-sm font-medium text-slate-300">
-            Tasks Due Today
-          </h3>
-          <span className="text-4xl font-bold text-red-400 mt-4">18</span>
-          <span className="absolute bottom-6 right-6 text-2xl font-bold text-red-400">
-            7
-          </span>
+        <div className="flex gap-3">
+          <Link
+            href="/tasks/new"
+            className="bg-[#242E3D] text-slate-300 border border-slate-700 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
+          >
+            + Task
+          </Link>
+          <Link
+            href="/pipeline/new"
+            className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-500/20 active:scale-95"
+          >
+            + New Deal
+          </Link>
         </div>
       </div>
 
-      {/* MIDDLE ROW: Charts */}
-      <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 grid grid-cols-1 lg:grid-cols-2 gap-8 items-center min-h-[300px]">
-        {/* Mock Funnel Chart */}
-        <div className="flex flex-col items-center justify-center pt-4">
-          <div className="w-full max-w-xs space-y-1 relative">
-            <div className="h-10 bg-blue-500 rounded-t-lg flex items-center justify-center text-xs font-bold text-white shadow-sm w-full">
-              Discovery (100)
-            </div>
-            <div className="h-10 bg-orange-400 flex items-center justify-center text-xs font-bold text-white shadow-sm mx-4">
-              Proposal (50)
-            </div>
-            <div className="h-10 bg-green-500 flex items-center justify-center text-xs font-bold text-white shadow-sm mx-8">
-              Negotiation (20)
-            </div>
-            <div className="h-10 bg-cyan-400 rounded-b-lg flex items-center justify-center text-xs font-bold text-white shadow-sm mx-12">
-              Won (10)
-            </div>
-          </div>
-        </div>
-
-        {/* Mock Line Chart */}
-        <div className="flex flex-col h-full justify-center">
-          <h3 className="text-sm font-medium text-slate-300 mb-6">
-            Revenue Forecast
-          </h3>
-          <div className="relative w-full h-40 border-b border-l border-slate-600">
-            {/* SVG Line representation matching the image */}
+      {/* METRICS SECTION */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <MetricCard
+          title="Active Pipeline"
+          value={`$${pipelineValue.toLocaleString()}`}
+          subtext={`Across ${activeDeals.length} open opportunities`}
+          icon={
             <svg
-              className="absolute inset-0 h-full w-full"
-              preserveAspectRatio="none"
-              viewBox="0 0 100 100"
+              className="w-6 h-6 text-blue-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
               <path
-                d="M 0 80 Q 20 80 30 70 T 50 60 T 70 30 T 100 20"
-                fill="none"
-                stroke="#22d3ee"
-                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
-              {/* Data points */}
-              <circle cx="0" cy="80" r="2" fill="#22d3ee" />
-              <circle cx="25" cy="75" r="2" fill="#22d3ee" />
-              <circle cx="40" cy="65" r="2" fill="#22d3ee" />
-              <circle cx="55" cy="55" r="2" fill="#22d3ee" />
-              <circle cx="75" cy="25" r="2" fill="#22d3ee" />
-              <circle cx="90" cy="15" r="2" fill="#22d3ee" />
-              <circle cx="100" cy="15" r="2" fill="#22d3ee" />
             </svg>
-            <div className="absolute -left-8 top-0 text-[10px] text-slate-400">
-              120%
-            </div>
-            <div className="absolute -left-8 top-1/2 text-[10px] text-slate-400">
-              24%
-            </div>
-            <div className="absolute -left-6 bottom-4 text-[10px] text-slate-400">
-              2%
-            </div>
-          </div>
-          <div className="flex justify-between text-[10px] text-slate-400 mt-2 px-2">
-            <span>M</span>
-            <span>10</span>
-            <span>40</span>
-            <span>140</span>
-            <span>120</span>
-            <span>290</span>
-          </div>
-        </div>
+          }
+        />
+        <MetricCard
+          title="Closed Won Revenue"
+          value={`$${revenueValue.toLocaleString()}`}
+          valueColor="text-emerald-400"
+          subtext={`From ${wonDeals.length} successful deals`}
+          icon={
+            <svg
+              className="w-6 h-6 text-emerald-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          }
+        />
+        <MetricCard
+          title="Pending Tasks"
+          value={tasks.length}
+          subtext="Require your attention"
+          icon={
+            <svg
+              className="w-6 h-6 text-orange-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+              />
+            </svg>
+          }
+        />
       </div>
 
-      {/* BOTTOM ROW: Action & Activity */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Action Center */}
-        <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50">
-          <h3 className="text-base font-semibold text-white mb-4">
-            Action Center
-          </h3>
-          <div className="mb-4">
-            <h4 className="text-sm text-white font-medium">
-              My Agenda for Today
-            </h4>
-            <span className="text-xs text-slate-400">Due 10 AM</span>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-6 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center text-xs">
-                  📞
-                </div>
-                <span className="text-slate-200">Call Sarah Connor</span>
-              </div>
-              <span className="text-slate-400 text-xs">Due 10 AM</span>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xs">
-                  ✉️
-                </div>
-                <span className="text-slate-200">Send pricing proposal</span>
-              </div>
-              <span className="text-slate-400 text-xs">Due 3:00 PM</span>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-6 h-6 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center text-xs">
-                  ✓
-                </div>
-                <span className="text-slate-200">Zoom meeting</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Activity */}
-        <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50">
-          <h3 className="text-base font-semibold text-white mb-6">
-            Recent Activity
-          </h3>
-
-          <div className="relative border-l border-slate-600 ml-2 space-y-6 pb-2">
-            <div className="relative pl-4">
-              <div className="absolute w-2 h-2 bg-slate-400 rounded-full -left-[5px] top-1.5"></div>
-              <p className="text-sm text-slate-300">
-                <span className="text-slate-400 text-xs mr-2">10 min ago:</span>
-                John Smith opened email
-              </p>
-            </div>
-
-            <div className="relative pl-4">
-              <div className="absolute w-2 h-2 bg-slate-400 rounded-full -left-[5px] top-1.5"></div>
-              <p className="text-sm text-slate-300">
-                <span className="text-slate-400 text-xs mr-2">2 hour ago:</span>
-                Emma added note to Stark Ind.
-              </p>
-            </div>
-
-            <div className="relative pl-4">
-              <div className="absolute w-2 h-2 bg-slate-400 rounded-full -left-[5px] top-1.5"></div>
-              <p className="text-sm text-slate-300">
-                <span className="text-slate-400 text-xs mr-2">2 hour ago:</span>
-                New lead assigned: Bruce Banner
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* LISTS SECTION */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <RecentDeals deals={activeDeals.slice(0, 5)} />
+        <UpcomingTasks tasks={tasks} />
       </div>
     </div>
   );

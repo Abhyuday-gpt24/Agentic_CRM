@@ -6,16 +6,23 @@ import { authOptions } from "../../../api/auth/[...nextauth]/route";
 import { prisma } from "../../../lib/prisma";
 import { createContact } from "../../../actions/contact_action";
 
-export default async function NewContactPage() {
+export default async function NewContactPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ companyId?: string }>;
+}) {
+  // 🚨 Restored the searchParams so your Company Card "+ Contact" button auto-fills this!
+  const { companyId } = await searchParams;
+
   // 1. Authenticate to get the user's Organization ID
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  if (!session?.user?.email) redirect("/");
 
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
   });
 
-  if (!dbUser || !dbUser.organizationId) redirect("/frontend");
+  if (!dbUser || !dbUser.organizationId) redirect("/");
 
   // 2. Fetch all companies for the dropdown
   const companies = await prisma.company.findMany({
@@ -27,7 +34,7 @@ export default async function NewContactPage() {
     <div className="p-6 md:p-8 max-w-3xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
-          href="/frontend/contacts"
+          href="/contacts"
           className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
         >
           <svg
@@ -44,13 +51,14 @@ export default async function NewContactPage() {
             />
           </svg>
         </Link>
-        <h1 className="text-2xl font-bold text-slate-800">Add New Lead</h1>
+        {/* 🚨 Updated terminology here */}
+        <h1 className="text-2xl font-bold text-slate-800">Add New Contact</h1>
       </div>
 
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-6 md:p-8">
         <p className="text-slate-400 text-sm mb-6 pb-4 border-b border-slate-700/50">
           {
-            "Enter the prospect's details below. Link them to an existing Account to track firmographics."
+            "Enter the contact's details below. Link them to an existing Account to track firmographics."
           }
         </p>
 
@@ -91,7 +99,6 @@ export default async function NewContactPage() {
             </div>
           </div>
 
-          {/* 🚨 THE NEW DYNAMIC COMPANY DROPDOWN 🚨 */}
           <div>
             <label
               htmlFor="companyId"
@@ -102,6 +109,7 @@ export default async function NewContactPage() {
             <select
               id="companyId"
               name="companyId"
+              defaultValue={companyId || ""} // 🚨 Auto-fill magic restored!
               className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             >
               <option value="">No Company / Independent</option>
@@ -138,16 +146,17 @@ export default async function NewContactPage() {
 
           <div className="pt-4 flex justify-end gap-3 border-t border-slate-700/50">
             <Link
-              href="/frontend/contacts"
+              href="/contacts"
               className="px-6 py-2.5 rounded-lg font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition"
             >
               Cancel
             </Link>
+            {/* 🚨 Updated terminology here */}
             <button
               type="submit"
               className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg active:scale-95"
             >
-              Save Lead
+              Save Contact
             </button>
           </div>
         </form>

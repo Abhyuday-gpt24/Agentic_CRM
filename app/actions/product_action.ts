@@ -5,23 +5,63 @@ import { authOptions } from "../api/auth/[...nextauth]/route";
 import { prisma } from "../lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { AuthUserWithTeam } from "../lib/rbac_helpers";
 
-export async function createProduct(formData: FormData) {
+// ==========================================
+// SECURITY HELPERS
+// ==========================================
+
+async function getAuthenticatedUser(): Promise<AuthUserWithTeam> {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) throw new Error("Unauthorized");
 
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
+    include: { teamMembers: true },
   });
 
-  if (!dbUser || !dbUser.organizationId)
+  if (!dbUser || !dbUser.organizationId) {
     throw new Error("No organization found");
+  }
 
+  return dbUser as AuthUserWithTeam;
+}
+
+/**
+ * 🚨 PRODUCT RBAC CHECKER
+ * Products are global to the Org, but restricted by Role.
+ */
+async function verifyProductAccess(
+  dbUser: AuthUserWithTeam,
+  productId?: string,
+) {
+  // 1. Role Check: Employees cannot modify the catalog
   if (dbUser.role === "EMPLOYEE") {
     throw new Error(
-      "Unauthorized: Only Admins and Managers can modify the product catalog.",
+      "Unauthorized: Only Admins and Managers can modify products.",
     );
   }
+
+  // 2. Existence/Org Check (if updating/deleting)
+  if (productId) {
+    const product = await prisma.product.findUnique({
+      where: {
+        id: productId,
+        organizationId: dbUser.organizationId,
+      },
+    });
+    if (!product) throw new Error("Product not found.");
+    return product;
+  }
+}
+
+// ==========================================
+// PRODUCT ACTIONS
+// ==========================================
+
+export async function createProduct(formData: FormData) {
+  const dbUser = await getAuthenticatedUser();
+  await verifyProductAccess(dbUser); // Ensure role permission
 
   const name = formData.get("name") as string;
   const description = formData.get("description") as string;
@@ -44,26 +84,13 @@ export async function createProduct(formData: FormData) {
 }
 
 export async function deleteProduct(id: string) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) throw new Error("Unauthorized");
+  const dbUser = await getAuthenticatedUser();
 
-  const dbUser = await prisma.user.findUnique({
-    where: { email: session.user.email },
-  });
-
-  if (!dbUser || !dbUser.organizationId) throw new Error("Unauthorized");
-
-  if (dbUser.role === "EMPLOYEE") {
-    throw new Error(
-      "Unauthorized: Only Admins and Managers can modify the product catalog.",
-    );
-  }
+  // 🚨 RBAC check ensures product belongs to org AND user has role permissions
+  await verifyProductAccess(dbUser, id);
 
   await prisma.product.delete({
-    where: {
-      id: id,
-      organizationId: dbUser.organizationId,
-    },
+    where: { id: id },
   });
 
   revalidatePath("/products");

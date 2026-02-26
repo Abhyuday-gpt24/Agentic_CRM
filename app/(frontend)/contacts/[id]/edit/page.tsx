@@ -5,6 +5,17 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../../../../api/auth/[...nextauth]/route";
 import { prisma } from "../../../../lib/prisma";
 import { updateContact } from "../../../../actions/contact_action";
+import { User } from "@prisma/client";
+import { getSecureOwnershipFilter } from "../../../../lib/rbac_helpers";
+
+// ==========================================
+// 1. STRICT TYPES
+// ==========================================
+
+type AuthUserWithTeam = Omit<User, "organizationId"> & {
+  organizationId: string;
+  teamMembers: User[];
+};
 
 export default async function EditContactPage({
   params,
@@ -12,21 +23,31 @@ export default async function EditContactPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+
   // 1. Authenticate
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
+  // 🚨 Fetch User & Team (Required for Manager RBAC)
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
+    include: { teamMembers: true },
   });
 
   if (!dbUser || !dbUser.organizationId) redirect("/");
 
-  // 2. Fetch the specific contact
-  const contact = await prisma.client.findUnique({
+  const authUser = dbUser as AuthUserWithTeam;
+
+  // 🚨 2. Get the dynamic ownership filter
+  const ownershipFilter = getSecureOwnershipFilter(authUser);
+
+  // 🚨 3. Fetch the specific contact WITH security check
+  // We use findFirst so we can combine the unique ID with our ownership filter
+  const contact = await prisma.contact.findFirst({
     where: {
       id: id,
-      organizationId: dbUser.organizationId,
+      organizationId: authUser.organizationId,
+      ...ownershipFilter, // 💥 Ensures user has permission to edit this specific contact
     },
   });
 
@@ -38,14 +59,13 @@ export default async function EditContactPage({
     );
   }
 
-  // 3. Fetch companies for the organization (so the select has data)
+  // 4. Fetch companies for the organization (Shared resource)
   const companies = await prisma.company.findMany({
-    where: { organizationId: dbUser.organizationId },
+    where: { organizationId: authUser.organizationId },
     orderBy: { name: "asc" },
   });
 
-  // 4. Bind the ID to the Server Action
-  // This securely passes the contact ID to your server without needing a hidden input field
+  // 5. Bind the ID to the Server Action
   const updateContactWithId = updateContact.bind(null, contact.id);
 
   return (

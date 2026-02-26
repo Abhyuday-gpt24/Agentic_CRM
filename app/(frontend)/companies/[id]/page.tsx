@@ -4,6 +4,17 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../api/auth/[...nextauth]/route";
 import { prisma } from "../../../lib/prisma";
+import { User } from "@prisma/client";
+import { getSecureOwnershipFilter } from "../../../lib/rbac_helpers";
+
+// ==========================================
+// 1. STRICT TYPES
+// ==========================================
+
+type AuthUserWithTeam = Omit<User, "organizationId"> & {
+  organizationId: string;
+  teamMembers: User[];
+};
 
 export default async function CompanyViewPage({
   params,
@@ -14,25 +25,34 @@ export default async function CompanyViewPage({
 
   // 1. Authenticate
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) redirect("/login");
+  if (!session?.user?.email) redirect("/");
 
+  // 🚨 Fetch User & Team (Required for Manager RBAC)
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
+    include: { teamMembers: true },
   });
 
-  if (!dbUser || !dbUser.organizationId) redirect("/frontend");
+  if (!dbUser || !dbUser.organizationId) redirect("/");
 
-  // 2. Fetch the specific company WITH all its employees and deals!
+  const authUser = dbUser as AuthUserWithTeam;
+
+  // 🚨 2. Get the dynamic ownership filter
+  const ownershipFilter = getSecureOwnershipFilter(authUser);
+
+  // 🚨 3. Fetch the specific company but SECURE the nested data
   const company = await prisma.company.findUnique({
     where: {
       id: id,
-      organizationId: dbUser.organizationId,
+      organizationId: authUser.organizationId,
     },
     include: {
-      clients: {
+      contacts: {
+        where: ownershipFilter, // 💥 Nested RBAC: Only see allowed contacts
         orderBy: { name: "asc" },
       },
       deals: {
+        where: ownershipFilter, // 💥 Nested RBAC: Only see allowed deals
         orderBy: { createdAt: "desc" },
       },
     },
@@ -46,7 +66,7 @@ export default async function CompanyViewPage({
     );
   }
 
-  // Calculate quick stats
+  // Calculate quick stats based ONLY on allowed data
   const totalPipeline = company.deals
     .filter((d) => d.stage !== "WON" && d.stage !== "LOST")
     .reduce((sum, deal) => sum + deal.amount, 0);
@@ -61,7 +81,7 @@ export default async function CompanyViewPage({
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-4">
           <Link
-            href="/frontend/companies"
+            href="/companies"
             className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
             title="Back to Companies"
           >
@@ -116,7 +136,7 @@ export default async function CompanyViewPage({
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow border border-slate-700/50">
           <p className="text-slate-400 text-sm mb-1">Total Contacts</p>
           <p className="text-2xl font-bold text-white">
-            {company.clients.length}
+            {company.contacts.length}
           </p>
         </div>
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow border border-slate-700/50">
@@ -141,22 +161,22 @@ export default async function CompanyViewPage({
               Contacts at {company.name}
             </h3>
             <Link
-              href="/frontend/contacts/new"
+              href="/contacts/new"
               className="text-xs text-blue-400 hover:text-blue-300 transition"
             >
               + Add Contact
             </Link>
           </div>
 
-          {company.clients.length === 0 ? (
+          {company.contacts.length === 0 ? (
             <div className="text-center py-6 text-slate-500 text-sm border-2 border-dashed border-slate-700 rounded-xl">
               No contacts linked to this account yet.
             </div>
           ) : (
             <div className="space-y-3">
-              {company.clients.map((client) => (
+              {company.contacts.map((client) => (
                 <Link
-                  href={`/frontend/contacts/${client.id}`}
+                  href={`/contacts/${client.id}`}
                   key={client.id}
                   className="block bg-[#1E2532] border border-slate-700 p-4 rounded-xl hover:border-blue-500/50 transition group"
                 >

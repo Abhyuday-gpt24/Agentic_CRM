@@ -10,7 +10,7 @@ export const pendingQuotationsTool = tool({
     employeeId: z.string(),
   }),
   execute: async ({ employeeId }) => {
-    const quotations = await prisma.client.findMany({
+    const quotations = await prisma.contact.findMany({
       where: {
         employeeId: employeeId,
         status: "AWAITING_QUOTATION",
