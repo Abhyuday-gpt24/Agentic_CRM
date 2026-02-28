@@ -3,8 +3,9 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "../../api/auth/[...nextauth]/route";
 import { prisma } from "../../lib/prisma";
-import { User } from "@prisma/client";
+import { User, Prisma } from "@prisma/client";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
+import DataFilters from "../components/data_filters";
 
 // ==========================================
 // 1. STRICT TYPES & RBAC LOGIC
@@ -15,37 +16,104 @@ type AuthUserWithTeam = Omit<User, "organizationId"> & {
   teamMembers: User[];
 };
 
-async function getReportData(dbUser: AuthUserWithTeam) {
-  // 🚨 1. Get the dynamic ownership filter from our central utility
-  const ownershipFilter = getSecureOwnershipFilter(dbUser);
+async function getReportData(
+  dbUser: AuthUserWithTeam,
+  searchParams: { dateRange?: string; ownerId?: string; q?: string },
+) {
+  // 1. 🚨 FIXED: Use functional resolution for Date Filtering to avoid type errors
+  const resolveDateFilter = () => {
+    if (searchParams.dateRange && searchParams.dateRange !== "ALL") {
+      const now = new Date();
+      const startDate = new Date();
 
-  // 🚨 2. Execute all three secure queries concurrently
+      if (searchParams.dateRange === "LAST_7_DAYS")
+        startDate.setDate(now.getDate() - 7);
+      if (searchParams.dateRange === "LAST_30_DAYS")
+        startDate.setDate(now.getDate() - 30);
+      if (searchParams.dateRange === "THIS_MONTH") startDate.setDate(1);
+
+      return { createdAt: { gte: startDate } };
+    }
+    return {};
+  };
+
+  // 2. 🚨 FIXED: Use functional resolution for Owner Filtering to eliminate 'any'
+  const resolveOwnerFilter = () => {
+    if (searchParams.ownerId && searchParams.ownerId !== "ALL") {
+      const requestedIds = searchParams.ownerId.split(",");
+      const authorizedIds: string[] = [];
+
+      for (const id of requestedIds) {
+        const isRequestingSelf = id === dbUser.id;
+        const isRequestingTeamMember = dbUser.teamMembers.some(
+          (tm) => tm.id === id,
+        );
+
+        if (
+          dbUser.role === "ADMIN" ||
+          isRequestingSelf ||
+          isRequestingTeamMember
+        ) {
+          authorizedIds.push(id);
+        }
+      }
+
+      if (authorizedIds.length > 0) {
+        return { employeeId: { in: authorizedIds } };
+      }
+    }
+    // Fallback to strict ownership if 'ALL' is selected or requested IDs are blocked
+    return getSecureOwnershipFilter(dbUser);
+  };
+
+  // Execute the functions so TypeScript can perfectly infer the shapes!
+  const dateFilter = resolveDateFilter();
+  const ownerFilter = resolveOwnerFilter();
+
+  // 3. Build specific where clauses for each model
+  const dealWhere: Prisma.DealWhereInput = {
+    organizationId: dbUser.organizationId,
+    ...ownerFilter,
+    ...dateFilter,
+    ...(searchParams.q
+      ? { name: { contains: searchParams.q, mode: "insensitive" } }
+      : {}),
+  };
+
+  const taskWhere: Prisma.TaskWhereInput = {
+    organizationId: dbUser.organizationId,
+    ...ownerFilter,
+    ...dateFilter,
+    ...(searchParams.q
+      ? { title: { contains: searchParams.q, mode: "insensitive" } }
+      : {}),
+  };
+
+  const contactWhere: Prisma.ContactWhereInput = {
+    organizationId: dbUser.organizationId,
+    ...ownerFilter,
+    ...dateFilter,
+    ...(searchParams.q
+      ? { name: { contains: searchParams.q, mode: "insensitive" } }
+      : {}),
+  };
+
+  // 4. Execute all three secure queries concurrently
   return await Promise.all([
-    prisma.deal.findMany({
-      where: {
-        organizationId: dbUser.organizationId,
-        ...ownershipFilter,
-      },
-    }),
-    prisma.task.findMany({
-      where: {
-        organizationId: dbUser.organizationId,
-        ...ownershipFilter,
-      },
-    }),
-    prisma.contact.count({
-      where: {
-        organizationId: dbUser.organizationId,
-        ...ownershipFilter,
-      },
-    }),
+    prisma.deal.findMany({ where: dealWhere }),
+    prisma.task.findMany({ where: taskWhere }),
+    prisma.contact.count({ where: contactWhere }),
   ]);
 }
 
 // ==========================================
 // 2. MAIN PAGE COMPONENT
 // ==========================================
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ dateRange?: string; ownerId?: string; q?: string }>;
+}) {
   // 1. Authenticate and get User
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
@@ -59,11 +127,39 @@ export default async function ReportsPage() {
   if (!dbUser || !dbUser.organizationId) redirect("/");
 
   const authUser = dbUser as AuthUserWithTeam;
+  const resolvedParams = await searchParams;
 
-  // 2. Fetch the dynamically filtered data
-  const [deals, tasks, clients] = await getReportData(authUser);
+  // 2. FETCH RAW OWNER OPTIONS FOR THE HYBRID INJECTOR
+  let ownerOptions: { label: string; value: string }[] | undefined = undefined;
 
-  // 3. Calculate Key Metrics based ONLY on what the user is allowed to see
+  if (authUser.role === "ADMIN" || authUser.role === "MANAGER") {
+    ownerOptions = [{ label: "Me Only", value: authUser.id }];
+
+    if (authUser.role === "ADMIN") {
+      const allUsers = await prisma.user.findMany({
+        where: { organizationId: authUser.organizationId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      ownerOptions = allUsers.map((u) => ({
+        label: u.name || "Unknown",
+        value: u.id,
+      }));
+    } else if (authUser.role === "MANAGER") {
+      ownerOptions = [
+        ...ownerOptions,
+        ...authUser.teamMembers.map((u) => ({
+          label: u.name || "Unknown",
+          value: u.id,
+        })),
+      ];
+    }
+  }
+
+  // 3. Fetch the dynamically filtered data
+  const [deals, tasks, clients] = await getReportData(authUser, resolvedParams);
+
+  // 4. Calculate Key Metrics based ONLY on what the user is allowed to see
   let totalRevenue = 0;
   let pipelineValue = 0;
   let wonDeals = 0;
@@ -110,16 +206,21 @@ export default async function ReportsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
-      <div className="mb-8">
-        {/* 🚨 Updated to text-white for dark theme consistency */}
-        <h1 className="text-2xl font-bold text-white">Sales Reports</h1>
-        <p className="text-sm text-slate-400">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-foreground">Sales Reports</h1>
+        <p className="text-sm text-slate-600">
           Real-time analytics and pipeline health.
         </p>
       </div>
 
+      {/* 🚨 THE UNIVERSAL FILTER COMPONENT */}
+      <DataFilters
+        searchPlaceholder="Search deals, tasks, or contacts..."
+        ownerOptions={ownerOptions}
+      />
+
       {/* TOP KPIs GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 mt-2">
         {/* Total Revenue */}
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-emerald-500/30">
           <p className="text-emerald-400 text-sm font-medium mb-1">

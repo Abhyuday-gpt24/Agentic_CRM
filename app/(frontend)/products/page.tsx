@@ -29,8 +29,10 @@ export default async function ProductsPage() {
     <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Product Catalog</h1>
-          <p className="text-sm text-slate-500">Manage your products.</p>
+          <h1 className="text-2xl font-bold text-foreground">
+            Product Catalog
+          </h1>
+          <p className="text-sm text-slate-600">Manage your products.</p>
         </div>
         {canEditProducts && (
           <Link

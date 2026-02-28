@@ -5,44 +5,159 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../api/auth/[...nextauth]/route";
 import { prisma } from "../../lib/prisma";
 import { toggleTaskCompletion, deleteTask } from "../../actions/task_action";
-import { User } from "@prisma/client";
+import { User, Prisma } from "@prisma/client";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
+import DataFilters, { FilterConfig } from "../components/data_filters";
 
 // ==========================================
-// 1. STRICT TYPES & RBAC LOGIC
+// 1. STRICT TYPES & CONSTANTS
 // ==========================================
 
-// Strictly typed user ensuring organizationId is a string
 type AuthUserWithTeam = Omit<User, "organizationId"> & {
   organizationId: string;
   teamMembers: User[];
 };
 
-async function getFilteredTasks(dbUser: AuthUserWithTeam) {
-  // 🚨 1. Get the dynamic ownership filter from our central utility
-  const ownershipFilter = getSecureOwnershipFilter(dbUser);
+const TASKS_PER_PAGE = 24;
 
-  // 🚨 2. Execute the securely filtered query
-  return await prisma.task.findMany({
-    where: {
-      organizationId: dbUser.organizationId,
-      ...ownershipFilter, // Instantly secures the query
-    },
-    include: {
-      contact: { select: { name: true } },
-      assignedTo: { select: { name: true } },
-    },
-    orderBy: [
-      { isCompleted: "asc" }, // Incomplete first
-      { dueDate: "asc" }, // Earliest due date first
-    ],
-  });
+// ==========================================
+// 2. THE SECURE QUERY ENGINE
+// ==========================================
+async function getPaginatedTasks(
+  dbUser: AuthUserWithTeam,
+  currentPage: number,
+  searchParams: {
+    q?: string;
+    status?: string;
+    dateRange?: string;
+    ownerId?: string;
+    sort?: string;
+  },
+) {
+  const skipAmount = (currentPage - 1) * TASKS_PER_PAGE;
+
+  // 1. Base Tenant Security
+  const whereClause: Prisma.TaskWhereInput = {
+    organizationId: dbUser.organizationId,
+  };
+
+  // 2. Text Search (Title or Description)
+  if (searchParams.q) {
+    whereClause.OR = [
+      { title: { contains: searchParams.q, mode: "insensitive" } },
+      { description: { contains: searchParams.q, mode: "insensitive" } },
+    ];
+  }
+
+  // 3. Status Filter
+  if (searchParams.status && searchParams.status !== "ALL") {
+    whereClause.isCompleted = searchParams.status === "COMPLETED";
+  }
+
+  // 4. Date Filtering
+  if (searchParams.dateRange && searchParams.dateRange !== "ALL") {
+    const now = new Date();
+    const startDate = new Date();
+
+    if (searchParams.dateRange === "LAST_7_DAYS")
+      startDate.setDate(now.getDate() - 7);
+    if (searchParams.dateRange === "LAST_30_DAYS")
+      startDate.setDate(now.getDate() - 30);
+    if (searchParams.dateRange === "THIS_MONTH") startDate.setDate(1);
+
+    whereClause.createdAt = { gte: startDate };
+  }
+
+  // 5. 🚨 MULTI-SELECT OWNER FILTER + STRICT RBAC VERIFICATION 🚨
+  if (searchParams.ownerId && searchParams.ownerId !== "ALL") {
+    const requestedIds = searchParams.ownerId.split(",");
+    const authorizedIds: string[] = [];
+
+    for (const id of requestedIds) {
+      const isRequestingSelf = id === dbUser.id;
+      const isRequestingTeamMember = dbUser.teamMembers.some(
+        (tm) => tm.id === id,
+      );
+
+      if (
+        dbUser.role === "ADMIN" ||
+        isRequestingSelf ||
+        isRequestingTeamMember
+      ) {
+        authorizedIds.push(id);
+      }
+    }
+
+    if (authorizedIds.length > 0) {
+      whereClause.employeeId = { in: authorizedIds };
+    } else {
+      Object.assign(whereClause, getSecureOwnershipFilter(dbUser));
+    }
+  } else {
+    Object.assign(whereClause, getSecureOwnershipFilter(dbUser));
+  }
+
+  // 6. Dynamic Sorting Logic
+  // Default sort: Incomplete first, then by earliest due date
+  let orderByClause:
+    | Prisma.TaskOrderByWithRelationInput
+    | Prisma.TaskOrderByWithRelationInput[] = [
+    { isCompleted: "asc" },
+    { dueDate: "asc" },
+  ];
+
+  if (searchParams.sort) {
+    switch (searchParams.sort) {
+      case "due_asc":
+        orderByClause = { dueDate: "asc" };
+        break;
+      case "due_desc":
+        orderByClause = { dueDate: "desc" };
+        break;
+      case "newest":
+        orderByClause = { createdAt: "desc" };
+        break;
+      case "oldest":
+        orderByClause = { createdAt: "asc" };
+        break;
+    }
+  }
+
+  // 7. Execute Queries in Parallel
+  const [tasks, totalTasks] = await Promise.all([
+    prisma.task.findMany({
+      where: whereClause,
+      include: {
+        contact: { select: { name: true } },
+        assignedTo: { select: { name: true } },
+      },
+      orderBy: orderByClause,
+      take: TASKS_PER_PAGE,
+      skip: skipAmount,
+    }),
+    prisma.task.count({ where: whereClause }),
+  ]);
+
+  const totalPages = Math.ceil(totalTasks / TASKS_PER_PAGE);
+
+  return { tasks, totalTasks, totalPages };
 }
 
 // ==========================================
-// 2. MAIN PAGE COMPONENT
+// 3. MAIN PAGE COMPONENT
 // ==========================================
-export default async function TasksPage() {
+export default async function TasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    page?: string;
+    q?: string;
+    status?: string;
+    dateRange?: string;
+    ownerId?: string;
+    sort?: string;
+  }>;
+}) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
@@ -55,15 +170,86 @@ export default async function TasksPage() {
   if (!dbUser || !dbUser.organizationId) redirect("/");
 
   const authUser = dbUser as AuthUserWithTeam;
-  const tasks = await getFilteredTasks(authUser);
+  const resolvedParams = await searchParams;
+  const currentPage = parseInt(resolvedParams.page || "1", 10);
+
+  // 🚨 1. DEFINE PAGE-SPECIFIC FILTERS
+  const pageFilters: FilterConfig[] = [
+    {
+      key: "status",
+      label: "Task Status",
+      options: [
+        { label: "Pending", value: "PENDING" },
+        { label: "Completed", value: "COMPLETED" },
+      ],
+    },
+  ];
+
+  // 🚨 2. FETCH RAW OWNER OPTIONS
+  let ownerOptions: { label: string; value: string }[] | undefined = undefined;
+
+  if (authUser.role === "ADMIN" || authUser.role === "MANAGER") {
+    ownerOptions = [{ label: "Me Only", value: authUser.id }];
+
+    if (authUser.role === "ADMIN") {
+      const allUsers = await prisma.user.findMany({
+        where: { organizationId: authUser.organizationId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      ownerOptions = allUsers.map((u) => ({
+        label: u.name || "Unknown",
+        value: u.id,
+      }));
+    } else if (authUser.role === "MANAGER") {
+      ownerOptions = [
+        ...ownerOptions,
+        ...authUser.teamMembers.map((u) => ({
+          label: u.name || "Unknown",
+          value: u.id,
+        })),
+      ];
+    }
+  }
+
+  // 🚨 3. DEFINE SORT OPTIONS FOR TASKS
+  const taskSortOptions = [
+    { label: "Earliest Due", value: "due_asc" },
+    { label: "Latest Due", value: "due_desc" },
+    { label: "Newest Created", value: "newest" },
+    { label: "Oldest Created", value: "oldest" },
+  ];
+
+  const { tasks, totalTasks, totalPages } = await getPaginatedTasks(
+    authUser,
+    currentPage,
+    resolvedParams,
+  );
+
+  // Safely build search params to keep filters active during pagination
+  const buildPageUrl = (pageNumber: number) => {
+    const params = new URLSearchParams();
+
+    Object.entries(resolvedParams).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    params.set("page", pageNumber.toString());
+
+    return `/tasks?${params.toString()}`;
+  };
 
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto w-full animate-in fade-in duration-500">
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Tasks</h1>
-          <p className="text-sm text-slate-600">
-            Manage follow-ups and daily activities.
+          <p className="text-sm text-slate-600 mt-1">
+            Showing{" "}
+            {tasks.length > 0 ? (currentPage - 1) * TASKS_PER_PAGE + 1 : 0} to{" "}
+            {Math.min(currentPage * TASKS_PER_PAGE, totalTasks)} of {totalTasks}{" "}
+            tasks.
           </p>
         </div>
         <Link
@@ -74,10 +260,21 @@ export default async function TasksPage() {
         </Link>
       </div>
 
+      {/* 🚨 THE UNIVERSAL FILTER COMPONENT */}
+      <DataFilters
+        searchPlaceholder="Search tasks by title or description..."
+        filters={pageFilters}
+        ownerOptions={ownerOptions}
+        sortOptions={taskSortOptions}
+      />
+
+      {/* Main Task List Area */}
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 overflow-hidden">
         {tasks.length === 0 ? (
           <div className="p-12 text-center text-slate-400 italic">
-            {"You're all caught up! Enjoy your day or add a new task."}
+            {Object.keys(resolvedParams).length > 0
+              ? "No tasks match your current filters. Try clearing them!"
+              : "You're all caught up! Enjoy your day or add a new task."}
           </div>
         ) : (
           <div className="divide-y divide-slate-700/50">
@@ -94,7 +291,6 @@ export default async function TasksPage() {
                 new Date(task.dueDate) < new Date() &&
                 !task.isCompleted;
 
-              // Security check: Only allow deleting if they own it, or if they are Admin/Manager
               const canDelete =
                 authUser.role === "ADMIN" ||
                 authUser.role === "MANAGER" ||
@@ -165,7 +361,6 @@ export default async function TasksPage() {
                         </span>
                       )}
 
-                      {/* 🚨 FIXED: Cleanly referencing task.assignedTo.name with full TypeScript support */}
                       {task.employeeId !== authUser.id &&
                         task.assignedTo?.name && (
                           <span className="text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
@@ -205,6 +400,42 @@ export default async function TasksPage() {
           </div>
         )}
       </div>
+
+      {/* 🚨 Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-4 mt-8">
+          {currentPage > 1 ? (
+            <Link
+              href={buildPageUrl(currentPage - 1)}
+              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
+            >
+              &larr; Previous
+            </Link>
+          ) : (
+            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
+              &larr; Previous
+            </span>
+          )}
+
+          <span className="text-slate-400 text-sm font-medium">
+            Page <span className="text-white">{currentPage}</span> of{" "}
+            {totalPages}
+          </span>
+
+          {currentPage < totalPages ? (
+            <Link
+              href={buildPageUrl(currentPage + 1)}
+              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
+            >
+              Next &rarr;
+            </Link>
+          ) : (
+            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
+              Next &rarr;
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

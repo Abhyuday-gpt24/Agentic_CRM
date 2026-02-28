@@ -57,8 +57,8 @@ export default function KanbanBoard({
   };
 
   return (
-    // Added custom scrollbar styling directly in Tailwind
-    <div className="flex gap-4 overflow-x-auto pb-4 h-full min-h-[600px] items-start [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-700 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
+    // 🚨 1. Outer Container: Takes full height, scrolls horizontally
+    <div className="flex gap-6 h-full overflow-x-auto pb-4 items-start [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-400 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent px-1">
       {STAGES.map((stage) => {
         const columnDeals = deals.filter((deal) => deal.stage === stage);
         const columnTotal = columnDeals.reduce(
@@ -67,19 +67,19 @@ export default function KanbanBoard({
         );
 
         return (
+          // 🚨 2. The Column: max-h-full forces it to respect the screen height
           <div
             key={stage}
             onDragOver={handleDragOver}
             onDrop={(e) => handleDrop(e, stage)}
-            // 🚨 THE FIX: Replaced w-80 with flex-1 min-w-[240px]
-            className="flex flex-col bg-[#1E2532] rounded-xl border border-slate-700/50 flex-1 min-w-[240px] max-w-[320px] shrink-0 shadow-lg h-full max-h-[75vh]"
+            className="flex flex-col flex-shrink-0 w-[320px] max-h-full bg-[#1E2532] rounded-2xl border border-slate-700 shadow-xl"
           >
-            {/* Column Header - Compact */}
-            <div className="p-3 border-b border-slate-700/50 flex justify-between items-center bg-[#242E3D] rounded-t-xl">
-              <h3 className="font-bold text-slate-300 text-xs tracking-wide">
+            {/* Column Header - Locks to the top */}
+            <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-[#242E3D] rounded-t-2xl shrink-0">
+              <h3 className="font-bold text-slate-200 text-xs tracking-widest uppercase">
                 {stage}
               </h3>
-              <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+              <span className="text-[11px] font-bold text-blue-400 bg-blue-500/10 px-2 py-1 rounded-md border border-blue-500/20">
                 $
                 {columnTotal.toLocaleString(undefined, {
                   minimumFractionDigits: 0,
@@ -87,8 +87,8 @@ export default function KanbanBoard({
               </span>
             </div>
 
-            {/* Column Body / Drop Zone - Tighter spacing */}
-            <div className="p-2.5 flex-1 overflow-y-auto space-y-2.5 min-h-[150px] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded-full">
+            {/* 🚨 3. Column Body: This is the ONLY part that scrolls vertically! */}
+            <div className="p-3 flex-1 overflow-y-auto space-y-3 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb]:rounded-full">
               {columnDeals.map((deal) => (
                 <DealCard
                   key={deal.id}
@@ -99,12 +99,12 @@ export default function KanbanBoard({
                 />
               ))}
 
-              {/* Empty state visual target - Now much smaller! */}
-              {columnDeals.length === 0 && (
-                <div className="text-center py-4 text-slate-600 text-[10px] uppercase tracking-wider font-semibold border-2 border-dashed border-slate-700/50 rounded-lg">
-                  Drop here
-                </div>
-              )}
+              {/* Enhanced Empty Drop Zone */}
+              <div className="h-24 w-full rounded-xl border-2 border-dashed border-slate-600 bg-[#242E3D]/30 flex items-center justify-center transition-colors hover:border-blue-500 hover:bg-blue-500/5">
+                <span className="text-slate-500 text-[10px] uppercase tracking-widest font-bold">
+                  Drop Here
+                </span>
+              </div>
             </div>
           </div>
         );
