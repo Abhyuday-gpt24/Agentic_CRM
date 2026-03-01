@@ -1,0 +1,410 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// NextAuth v4 Standard Models
+// ==========================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ==========================================
+// Deeply Refactored Agentic CRM Models
+// ==========================================
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}
+
+model Organization {
+  id            String    @id @default(cuid())
+  name          String
+  industry      String?
+  employeeCount String?
+  website       String?
+  address       String?   @db.Text
+
+  createdAt DateTime @default(now())
+
+  users     User[]
+  contacts  Contact[] 
+  products  Product[]
+  deals     Deal[]
+  companies Company[]
+  tasks     Task[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
+  role          Role      @default(EMPLOYEE)
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  managerId      String?
+  manager        User?         @relation("TeamHierarchy", fields: [managerId], references: [id])
+  teamMembers    User[]        @relation("TeamHierarchy")
+
+  accounts Account[]
+  sessions Session[]
+  contacts Contact[]     
+  drafts   EmailDraft[]
+  deals    Deal[]
+  tasks    Task[]
+}
+
+// ==========================================
+// SFA Enums (Zoho Standard)
+// ==========================================
+
+enum ContactType {
+  LEAD
+  CONTACT
+}
+
+enum LeadSource {
+  WEBSITE
+  COLD_CALL
+  TRADE_SHOW
+  REFERRAL
+  LINKEDIN
+  PARTNER
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  ATTEMPTED_CONTACT
+  ENGAGED
+  QUALIFIED
+  UNQUALIFIED
+}
+
+enum AccountType {
+  PROSPECT
+  CUSTOMER
+  VENDOR
+  PARTNER
+  COMPETITOR
+}
+
+enum DealType {
+  NEW_BUSINESS
+  EXISTING_BUSINESS
+}
+
+// ==========================================
+// The Core Target for the AI (Leads & Contacts)
+// ==========================================
+
+model Contact {
+  id                  String       @id @default(cuid())
+  type                ContactType  @default(LEAD)
+  
+  // Core Identity
+  name                String       // Kept for backward compatibility
+  firstName           String?      // 🌟 SFA Standard
+  lastName            String?      // 🌟 SFA Standard
+  email               String       @unique
+  secondaryEmail      String?      // 🌟 SFA Standard
+  
+  // Professional Context (SFA Standard)
+  jobTitle            String?
+  department          String?
+  phone               String?
+  mobile              String?
+  linkedInUrl         String?
+  
+  // Lead-Specific Tracking (SFA Standard)
+  leadSource          LeadSource?
+  leadStatus          LeadStatus?
+  rating              String?      // e.g., "Hot", "Warm", "Cold"
+  tempCompanyName     String?      // Used before conversion to an Account
+  
+  // Geographic Address (SFA Standard)
+  street              String?
+  city                String?
+  state               String?
+  zipCode             String?
+  country             String?
+
+  status              String       @default("ACTIVE")
+  
+  employeeId          String
+  managedBy           User         @relation(fields: [employeeId], references: [id])
+
+  // AI Context & Automation Triggers
+  relationshipContext String?      @db.Text
+  lastContactedAt     DateTime?
+  nextFollowUpDate    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  interactions Interaction[]
+  emailDrafts  EmailDraft[]
+  deals        Deal[]
+  tasks        Task[]
+  
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  companyId      String?
+  companyRecord  Company?     @relation(fields: [companyId], references: [id])
+
+  @@index([organizationId])
+  @@index([nextFollowUpDate])
+  @@index([employeeId])
+}
+
+// ==========================================
+// Interaction & Draft Models
+// ==========================================
+
+enum InteractionType {
+  EMAIL_SENT
+  EMAIL_RECEIVED
+  CALL
+  MEETING
+}
+
+model Interaction {
+  id          String          @id @default(cuid())
+  type        InteractionType
+  date        DateTime        @default(now())
+  summary     String          @db.Text
+  fullContent String?         @db.Text
+
+  clientId    String
+  contact     Contact         @relation(fields: [clientId], references: [id], onDelete: Cascade) 
+
+  @@index([clientId, date])
+}
+
+enum DraftStatus {
+  PENDING_APPROVAL
+  APPROVED_AND_SENT
+  REJECTED
+  USER_EDITED
+}
+
+model EmailDraft {
+  id          String      @id @default(cuid())
+  subject     String
+  body        String      @db.Text
+  aiReasoning String?     @db.Text
+  status      DraftStatus @default(PENDING_APPROVAL)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId  String
+  contact   Contact     @relation(fields: [clientId], references: [id], onDelete: Cascade) 
+
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
+}
+
+// ==========================================
+// Account / Company Model
+// ==========================================
+
+model Company {
+  id              String       @id @default(cuid())
+  name            String
+  type            AccountType  @default(PROSPECT) // 🌟 SFA Standard
+  industry        String?
+  website         String?
+  phone           String?      // 🌟 SFA Standard
+  employeeCount   String?
+  annualRevenue   Float?       // 🌟 SFA Standard
+  tickerSymbol    String?      // 🌟 SFA Standard
+  
+  // Billing Address (SFA Standard)
+  billingStreet   String?
+  billingCity     String?
+  billingState    String?
+  billingZip      String?
+  billingCountry  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  contacts       Contact[] 
+  deals          Deal[]
+
+  @@index([organizationId])
+}
+
+// ==========================================
+// Sales, Products & Pipeline Models
+// ==========================================
+
+model Product {
+  id             String       @id @default(cuid())
+  name           String
+  description    String?      @db.Text
+  price          Float        // Base catalog price
+  sku            String?
+  isActive       Boolean      @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  dealItems      DealItem[]
+
+  @@index([organizationId])
+}
+
+enum DealStage {
+  DISCOVERY
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+model Deal {
+  id              String    @id @default(cuid())
+  name            String
+  amount          Float     @default(0) // Cached total from DealItems
+  stage           DealStage @default(DISCOVERY)
+  closeDate       DateTime?
+  
+  // SFA Forecasting & Tracking (🌟 SFA Standard)
+  probability     Int?      // e.g., 10, 50, 90
+  expectedRevenue Float?    // amount * (probability / 100)
+  dealType        DealType? // New Business vs Existing Business
+  nextStep        String?   // "Send Contract", "Follow up call"
+  leadSource      LeadSource? // Inherited from the converted lead
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId       String
+  contact        Contact   @relation(fields: [clientId], references: [id], onDelete: Cascade) 
+
+  employeeId     String
+  managedBy      User      @relation(fields: [employeeId], references: [id])
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  dealItems      DealItem[]
+  companyId      String?
+  company        Company?     @relation(fields: [companyId], references: [id])
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([employeeId])
+}
+
+model DealItem {
+  id         String   @id @default(cuid())
+  name       String   
+  quantity   Int      @default(1)
+  unitPrice  Float    
+  totalPrice Float    
+
+  dealId     String
+  deal       Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  productId  String?  
+  product    Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([dealId])
+  @@index([productId])
+}
+
+// ==========================================
+// Task / Activity Model
+// ==========================================
+
+model Task {
+  id             String   @id @default(cuid())
+  title          String
+  description    String?  @db.Text
+  dueDate        DateTime?
+  isCompleted    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employeeId     String
+  assignedTo     User     @relation(fields: [employeeId], references: [id])
+
+  clientId       String?
+  contact        Contact? @relation(fields: [clientId], references: [id], onDelete: SetNull) 
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([dueDate])
+}

@@ -41,5 +41,5 @@ yarn-error.log*
 next-env.d.ts
 
 # Generated Prisma Client directory (adjust path if using a custom output location)
-/prisma
+/prisma/generated
 
