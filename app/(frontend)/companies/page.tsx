@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../api/auth/[...nextauth]/route";
 import { prisma } from "../../lib/prisma";
 import CompanyCard from "./company_card";
-import { User, Prisma } from "@prisma/client";
+import { User, Prisma, AccountType } from "@prisma/client"; // 🚨 Imported AccountType
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
-import DataFilters from "../components/data_filters";
+import DataFilters, { FilterConfig } from "../components/data_filters";
+import Pagination from "../components/pagination"; // 🚨 Imported our reusable component!
 
 // ==========================================
 // 1. STRICT TYPES & CONSTANTS
@@ -30,6 +31,7 @@ async function getPaginatedCompanies(
     q?: string;
     dateRange?: string;
     sort?: string;
+    accountType?: string; // 🚨 New SFA Filter
   },
 ) {
   const ownershipFilter = getSecureOwnershipFilter(authUser);
@@ -40,12 +42,23 @@ async function getPaginatedCompanies(
     organizationId: authUser.organizationId,
   };
 
-  // 2. Text Search (Company Name)
+  // 2. 🚨 UPGRADED: Text Search (Now includes Name and Ticker Symbol)
   if (searchParams.q) {
-    whereClause.name = { contains: searchParams.q, mode: "insensitive" };
+    whereClause.OR = [
+      { name: { contains: searchParams.q, mode: "insensitive" } },
+      { tickerSymbol: { contains: searchParams.q, mode: "insensitive" } },
+    ];
   }
 
-  // 3. Date Filtering
+  // 3. 🚨 NEW: Account Type Filtering (SFA Standard)
+  if (searchParams.accountType && searchParams.accountType !== "ALL") {
+    const validTypes = Object.values(AccountType);
+    if (validTypes.includes(searchParams.accountType as AccountType)) {
+      whereClause.type = searchParams.accountType as AccountType;
+    }
+  }
+
+  // 4. Date Filtering
   if (searchParams.dateRange && searchParams.dateRange !== "ALL") {
     const now = new Date();
     const startDate = new Date();
@@ -59,7 +72,7 @@ async function getPaginatedCompanies(
     whereClause.createdAt = { gte: startDate };
   }
 
-  // 4. Dynamic Sorting Logic
+  // 5. Dynamic Sorting Logic
   let orderByClause: Prisma.CompanyOrderByWithRelationInput = { name: "asc" }; // Default
 
   if (searchParams.sort) {
@@ -82,7 +95,7 @@ async function getPaginatedCompanies(
     }
   }
 
-  // 5. Execute Queries in Parallel
+  // 6. Execute Queries in Parallel
   const [companies, totalCompanies] = await Promise.all([
     prisma.company.findMany({
       where: whereClause,
@@ -119,6 +132,7 @@ export default async function CompaniesPage({
     q?: string;
     dateRange?: string;
     sort?: string;
+    accountType?: string;
   }>;
 }) {
   const session = await getServerSession(authOptions);
@@ -139,7 +153,22 @@ export default async function CompaniesPage({
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || "1", 10);
 
-  // 🚨 Define Sort Options for Companies
+  // 🚨 Add SFA Dynamic Filters for Accounts
+  const companyFilters: FilterConfig[] = [
+    {
+      key: "accountType",
+      label: "Account Type",
+      options: [
+        { label: "Prospect", value: "PROSPECT" },
+        { label: "Customer", value: "CUSTOMER" },
+        { label: "Partner", value: "PARTNER" },
+        { label: "Vendor", value: "VENDOR" },
+        { label: "Competitor", value: "COMPETITOR" },
+      ],
+    },
+  ];
+
+  // Define Sort Options for Companies
   const companySortOptions = [
     { label: "Name (A-Z)", value: "name_asc" },
     { label: "Name (Z-A)", value: "name_desc" },
@@ -187,21 +216,22 @@ export default async function CompaniesPage({
         </div>
         <Link
           href="/companies/new"
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-500/20 active:scale-95"
         >
           + New Company
         </Link>
       </div>
 
-      {/* 🚨 Filter Component */}
+      {/* 🚨 Filter Component (Now includes Account Type dropdown!) */}
       <DataFilters
-        searchPlaceholder="Search companies by name..."
+        searchPlaceholder="Search accounts by name or ticker..."
+        filters={companyFilters}
         sortOptions={companySortOptions}
       />
 
       {/* Empty State */}
       {companies.length === 0 ? (
-        <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-12 text-center text-slate-400">
+        <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-12 text-center text-slate-400 italic">
           {Object.keys(resolvedParams).length > 0
             ? "No accounts match your current filters. Try clearing them!"
             : 'No accounts found. Click "+ New Company" to add your first target organization!'}
@@ -219,41 +249,12 @@ export default async function CompaniesPage({
             ))}
           </div>
 
-          {/* 🚨 Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-4 mt-10">
-              {currentPage > 1 ? (
-                <Link
-                  href={buildPageUrl(currentPage - 1)}
-                  className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-                >
-                  &larr; Previous
-                </Link>
-              ) : (
-                <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-                  &larr; Previous
-                </span>
-              )}
-
-              <span className="text-slate-400 text-sm font-medium">
-                Page <span className="text-white">{currentPage}</span> of{" "}
-                {totalPages}
-              </span>
-
-              {currentPage < totalPages ? (
-                <Link
-                  href={buildPageUrl(currentPage + 1)}
-                  className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-                >
-                  Next &rarr;
-                </Link>
-              ) : (
-                <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-                  Next &rarr;
-                </span>
-              )}
-            </div>
-          )}
+          {/* 🚨 Replaced massive pagination block with our clean component! */}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            buildPageUrl={buildPageUrl}
+          />
         </>
       )}
     </div>

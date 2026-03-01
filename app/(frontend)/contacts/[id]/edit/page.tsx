@@ -42,7 +42,6 @@ export default async function EditContactPage({
   const ownershipFilter = getSecureOwnershipFilter(authUser);
 
   // 🚨 3. Fetch the specific contact WITH security check
-  // We use findFirst so we can combine the unique ID with our ownership filter
   const contact = await prisma.contact.findFirst({
     where: {
       id: id,
@@ -65,11 +64,34 @@ export default async function EditContactPage({
     orderBy: { name: "asc" },
   });
 
-  // 5. Bind the ID to the Server Action
+  // 🚨 5. Determine who this user is allowed to assign leads to (For Reassignment)
+  let assignableUsers: { id: string; name: string }[] = [];
+
+  if (authUser.role === "ADMIN") {
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: authUser.organizationId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    assignableUsers = allUsers.map((u) => ({
+      id: u.id,
+      name: u.name || "Unknown User",
+    }));
+  } else if (authUser.role === "MANAGER") {
+    assignableUsers = [
+      { id: authUser.id, name: "Me (Self)" },
+      ...authUser.teamMembers.map((u) => ({
+        id: u.id,
+        name: u.name || "Unknown User",
+      })),
+    ];
+  }
+
+  // 6. Bind the ID to the Server Action
   const updateContactWithId = updateContact.bind(null, contact.id);
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto w-full animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
           href="/contacts"
@@ -91,111 +113,447 @@ export default async function EditContactPage({
           </svg>
         </Link>
         <h1 className="text-2xl font-bold text-slate-800">
-          Edit Lead: {contact.name}
+          Edit {contact.type === "LEAD" ? "Lead" : "Contact"}: {contact.name}
         </h1>
       </div>
 
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-6 md:p-8">
-        {/* The form action uses the bound function */}
-        <form action={updateContactWithId} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label
-                htmlFor="name"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Full Name *
-              </label>
-              <input
-                type="text"
-                id="name"
-                name="name"
-                required
-                defaultValue={contact.name} // Pre-fill existing data
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Email Address *
-              </label>
-              <input
-                type="email"
-                id="email"
-                name="email"
-                required
-                defaultValue={contact.email}
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label
-                htmlFor="companyId"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Associated Company
-              </label>
-              <select
-                id="companyId"
-                name="companyId"
-                defaultValue={contact.companyId || ""} // Pre-selects the existing company!
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="">No Company / Independent</option>
-                {companies.map((company) => (
-                  <option key={company.id} value={company.id}>
-                    {company.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Added a Status dropdown so users can move deals through the pipeline! */}
-            <div>
-              <label
-                htmlFor="status"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Deal Status
-              </label>
-              <select
-                id="status"
-                name="status"
-                defaultValue={contact.status}
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="ACTIVE">Active (Discovery)</option>
-                <option value="PROPOSAL">Proposal Sent</option>
-                <option value="NEGOTIATION">In Negotiation</option>
-                <option value="WON">Closed Won</option>
-                <option value="LOST">Closed Lost</option>
-              </select>
-            </div>
-          </div>
-
+        <form action={updateContactWithId} className="space-y-8">
+          {/* SECTION 1: Core Identity */}
           <div>
-            <label
-              htmlFor="context"
-              className="block text-sm font-medium text-slate-300 mb-2"
-            >
-              Relationship Context (AI Notes)
-            </label>
-            <textarea
-              id="context"
-              name="context"
-              rows={4}
-              defaultValue={contact.relationshipContext || ""}
-              className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-            />
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Core Identity
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label
+                  htmlFor="type"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Record Type *
+                </label>
+                <select
+                  id="type"
+                  name="type"
+                  defaultValue={contact.type}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="LEAD">Lead (Unqualified)</option>
+                  <option value="CONTACT">Contact (Qualified)</option>
+                </select>
+              </div>
+
+              {/* 🚨 Re-Assignment Dropdown (Only renders for Admins & Managers) */}
+              {authUser.role === "ADMIN" || authUser.role === "MANAGER" ? (
+                <div>
+                  <label
+                    htmlFor="employeeId"
+                    className="block text-sm font-medium text-slate-300 mb-2"
+                  >
+                    Re-assign Record To
+                  </label>
+                  <select
+                    id="employeeId"
+                    name="employeeId"
+                    defaultValue={contact.employeeId}
+                    className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    {assignableUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="hidden md:block"></div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="firstName"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  First Name
+                </label>
+                <input
+                  type="text"
+                  id="firstName"
+                  name="firstName"
+                  defaultValue={contact.firstName || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="lastName"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Last Name *
+                </label>
+                <input
+                  type="text"
+                  id="lastName"
+                  name="lastName"
+                  defaultValue={contact.lastName || ""}
+                  required
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="email"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Primary Email *
+                </label>
+                <input
+                  type="email"
+                  id="email"
+                  name="email"
+                  defaultValue={contact.email}
+                  required
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="secondaryEmail"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Secondary Email
+                </label>
+                <input
+                  type="email"
+                  id="secondaryEmail"
+                  name="secondaryEmail"
+                  defaultValue={contact.secondaryEmail || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
           </div>
 
+          {/* SECTION 2: Professional Details */}
+          <div>
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Professional Details
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label
+                  htmlFor="companyId"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Associated Account
+                </label>
+                <select
+                  id="companyId"
+                  name="companyId"
+                  defaultValue={contact.companyId || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">No Account / Independent</option>
+                  {companies.map((company) => (
+                    <option key={company.id} value={company.id}>
+                      {company.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="tempCompanyName"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Company Name (If no Account exists)
+                </label>
+                <input
+                  type="text"
+                  id="tempCompanyName"
+                  name="tempCompanyName"
+                  defaultValue={contact.tempCompanyName || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="jobTitle"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Job Title
+                </label>
+                <input
+                  type="text"
+                  id="jobTitle"
+                  name="jobTitle"
+                  defaultValue={contact.jobTitle || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="department"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Department
+                </label>
+                <input
+                  type="text"
+                  id="department"
+                  name="department"
+                  defaultValue={contact.department || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="phone"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Office Phone
+                </label>
+                <input
+                  type="text"
+                  id="phone"
+                  name="phone"
+                  defaultValue={contact.phone || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="mobile"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Mobile Phone
+                </label>
+                <input
+                  type="text"
+                  id="mobile"
+                  name="mobile"
+                  defaultValue={contact.mobile || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="linkedInUrl"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  LinkedIn Profile URL
+                </label>
+                <input
+                  type="url"
+                  id="linkedInUrl"
+                  name="linkedInUrl"
+                  defaultValue={contact.linkedInUrl || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 3: Lead Tracking & SFA */}
+          <div>
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Sales Tracking
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label
+                  htmlFor="leadSource"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Lead Source
+                </label>
+                <select
+                  id="leadSource"
+                  name="leadSource"
+                  defaultValue={contact.leadSource || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">-- Select Source --</option>
+                  <option value="WEBSITE">Website</option>
+                  <option value="COLD_CALL">Cold Call</option>
+                  <option value="TRADE_SHOW">Trade Show</option>
+                  <option value="REFERRAL">Referral</option>
+                  <option value="LINKEDIN">LinkedIn</option>
+                  <option value="PARTNER">Partner</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="leadStatus"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Lead Status
+                </label>
+                <select
+                  id="leadStatus"
+                  name="leadStatus"
+                  defaultValue={contact.leadStatus || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">-- Select Status --</option>
+                  <option value="NEW">New</option>
+                  <option value="ATTEMPTED_CONTACT">Attempted Contact</option>
+                  <option value="ENGAGED">Engaged</option>
+                  <option value="QUALIFIED">Qualified</option>
+                  <option value="UNQUALIFIED">Unqualified</option>
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="rating"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Rating
+                </label>
+                <select
+                  id="rating"
+                  name="rating"
+                  defaultValue={contact.rating || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">-- Select Rating --</option>
+                  <option value="Hot">🔥 Hot</option>
+                  <option value="Warm">☀️ Warm</option>
+                  <option value="Cold">❄️ Cold</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 4: Location */}
+          <div>
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Address
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="md:col-span-2">
+                <label
+                  htmlFor="street"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Street Address
+                </label>
+                <input
+                  type="text"
+                  id="street"
+                  name="street"
+                  defaultValue={contact.street || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="city"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  City
+                </label>
+                <input
+                  type="text"
+                  id="city"
+                  name="city"
+                  defaultValue={contact.city || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="state"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  State / Province
+                </label>
+                <input
+                  type="text"
+                  id="state"
+                  name="state"
+                  defaultValue={contact.state || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="zipCode"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Zip / Postal Code
+                </label>
+                <input
+                  type="text"
+                  id="zipCode"
+                  name="zipCode"
+                  defaultValue={contact.zipCode || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="country"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Country
+                </label>
+                <input
+                  type="text"
+                  id="country"
+                  name="country"
+                  defaultValue={contact.country || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 5: AI Context & Status */}
+          <div>
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Status & AI Context
+            </h2>
+            <div className="space-y-6">
+              <div>
+                <label
+                  htmlFor="status"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Contact Status
+                </label>
+                <select
+                  id="status"
+                  name="status"
+                  defaultValue={contact.status}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                  <option value="ARCHIVED">Archived</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="context"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Relationship Context (AI Notes)
+                </label>
+                <textarea
+                  id="context"
+                  name="context"
+                  rows={4}
+                  defaultValue={contact.relationshipContext || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* SUBMIT BUTTON */}
           <div className="pt-4 flex justify-end gap-3 border-t border-slate-700/50">
             <Link
               href="/contacts"

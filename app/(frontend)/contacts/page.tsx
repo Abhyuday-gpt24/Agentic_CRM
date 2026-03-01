@@ -8,6 +8,7 @@ import ContactCard from "./contact_card";
 import { User, Prisma, ContactType } from "@prisma/client";
 import DataFilters, { FilterConfig } from "../components/data_filters";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
+import Pagination from "../components/pagination"; // 🚨 Imported our new reusable component!
 
 // ==========================================
 // 1. STRICT TYPES & CONSTANTS
@@ -38,10 +39,12 @@ async function getFilteredContacts(
     organizationId: dbUser.organizationId,
   };
 
-  // 2. Text Search (Name or Email)
+  // 2. 🚨 UPGRADED: Text Search (Now includes SFA split names)
   if (searchParams.q) {
     whereClause.OR = [
       { name: { contains: searchParams.q, mode: "insensitive" } },
+      { firstName: { contains: searchParams.q, mode: "insensitive" } },
+      { lastName: { contains: searchParams.q, mode: "insensitive" } },
       { email: { contains: searchParams.q, mode: "insensitive" } },
     ];
   }
@@ -68,15 +71,11 @@ async function getFilteredContacts(
     whereClause.createdAt = { gte: startDate };
   }
 
-  // 5. 🚨 MULTI-SELECT OWNER FILTER + STRICT RBAC VERIFICATION 🚨
+  // 5. MULTI-SELECT OWNER FILTER + STRICT RBAC VERIFICATION
   if (searchParams.ownerId && searchParams.ownerId !== "ALL") {
-    // 1. Split the comma-separated URL string into an array of IDs
     const requestedIds = searchParams.ownerId.split(",");
-
-    // 2. Create a blank array to hold only the IDs this user is ALLOWED to see
     const authorizedIds: string[] = [];
 
-    // 3. Loop through every requested ID and run it through the security checkpoint
     for (const id of requestedIds) {
       const isRequestingSelf = id === dbUser.id;
       const isRequestingTeamMember = dbUser.teamMembers.some(
@@ -88,20 +87,16 @@ async function getFilteredContacts(
         isRequestingSelf ||
         isRequestingTeamMember
       ) {
-        // ✅ Approved: Add to the safe list
         authorizedIds.push(id);
       }
     }
 
-    // 4. Apply the safe list to the database query
     if (authorizedIds.length > 0) {
-      whereClause.employeeId = { in: authorizedIds }; // 🔥 Use Prisma's 'in' operator
+      whereClause.employeeId = { in: authorizedIds };
     } else {
-      // ❌ Blocked: They requested IDs they have no access to. Fallback to default ownership.
       Object.assign(whereClause, getSecureOwnershipFilter(dbUser));
     }
   } else {
-    // Default RBAC view if no specific owner is selected
     Object.assign(whereClause, getSecureOwnershipFilter(dbUser));
   }
 
@@ -200,20 +195,18 @@ export default async function ContactsPage({
 
     dynamicFilters.push({
       key: "ownerId",
-      label: authUser.role === "MANAGER" ? "My Team" : "Owners", // Pluralized for clarity
+      label: authUser.role === "MANAGER" ? "My Team" : "Owners",
       options: ownerOptions,
-      isMulti: true, // 🚨 Trigger the checkbox multi-select UI
+      isMulti: true,
     });
   }
 
-  // Fetch the safely paginated and filtered contacts
   const { contacts, totalContacts, totalPages } = await getFilteredContacts(
     authUser,
     currentPage,
     resolvedParams,
   );
 
-  // Safely build search params without using 'any'
   const buildPageUrl = (pageNumber: number) => {
     const params = new URLSearchParams();
 
@@ -228,7 +221,6 @@ export default async function ContactsPage({
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
-      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
@@ -251,13 +243,11 @@ export default async function ContactsPage({
         </Link>
       </div>
 
-      {/* Filter Component */}
       <DataFilters
         searchPlaceholder="Search contacts by name or email..."
         filters={dynamicFilters}
       />
 
-      {/* Empty State */}
       {contacts.length === 0 ? (
         <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-12 text-center text-slate-400 italic">
           {Object.keys(resolvedParams).length > 0
@@ -266,7 +256,6 @@ export default async function ContactsPage({
         </div>
       ) : (
         <>
-          {/* Grid Layout */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {contacts.map((contact) => {
               const canEdit =
@@ -284,41 +273,12 @@ export default async function ContactsPage({
             })}
           </div>
 
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="flex justify-center items-center gap-4 mt-10">
-              {currentPage > 1 ? (
-                <Link
-                  href={buildPageUrl(currentPage - 1)}
-                  className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-                >
-                  &larr; Previous
-                </Link>
-              ) : (
-                <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-                  &larr; Previous
-                </span>
-              )}
-
-              <span className="text-slate-400 text-sm font-medium">
-                Page <span className="text-white">{currentPage}</span> of{" "}
-                {totalPages}
-              </span>
-
-              {currentPage < totalPages ? (
-                <Link
-                  href={buildPageUrl(currentPage + 1)}
-                  className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-                >
-                  Next &rarr;
-                </Link>
-              ) : (
-                <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-                  Next &rarr;
-                </span>
-              )}
-            </div>
-          )}
+          {/* 🚨 Replaced 30 lines of code with our reusable component! */}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            buildPageUrl={buildPageUrl}
+          />
         </>
       )}
     </div>

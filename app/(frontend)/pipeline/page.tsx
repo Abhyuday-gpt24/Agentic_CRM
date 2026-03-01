@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../api/auth/[...nextauth]/route";
 import { prisma } from "../../lib/prisma";
 import KanbanBoard from "./kanban_board";
-import { User, Prisma } from "@prisma/client";
+import { User, Prisma, DealType } from "@prisma/client"; // 🚨 Imported DealType
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
-import DataFilters from "../components/data_filters";
+import DataFilters, { FilterConfig } from "../components/data_filters";
+import Pagination from "../components/pagination"; // 🚨 Imported Pagination
 
 type AuthUserWithTeam = Omit<User, "organizationId"> & {
   organizationId: string;
@@ -24,6 +25,7 @@ async function getPaginatedDeals(
     dateRange?: string;
     ownerId?: string;
     sort?: string;
+    dealType?: string; // 🚨 New SFA Filter
   },
 ) {
   const thirtyDaysAgo = new Date();
@@ -87,6 +89,10 @@ async function getPaginatedDeals(
     ...(searchParams.q
       ? { name: { contains: searchParams.q, mode: "insensitive" } }
       : {}),
+    // 🚨 Add SFA Deal Type filter
+    ...(searchParams.dealType && searchParams.dealType !== "ALL"
+      ? { dealType: searchParams.dealType as DealType }
+      : {}),
     // Keep the existing logic to hide old Won/Lost deals
     AND: [
       {
@@ -149,6 +155,7 @@ export default async function PipelinePage({
     dateRange?: string;
     ownerId?: string;
     sort?: string;
+    dealType?: string;
   }>;
 }) {
   const session = await getServerSession(authOptions);
@@ -165,7 +172,7 @@ export default async function PipelinePage({
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || "1", 10);
 
-  // 🚨 FETCH RAW OWNER OPTIONS FOR THE HYBRID INJECTOR
+  // FETCH RAW OWNER OPTIONS FOR THE HYBRID INJECTOR
   let ownerOptions: { label: string; value: string }[] | undefined = undefined;
 
   if (authUser.role === "ADMIN" || authUser.role === "MANAGER") {
@@ -192,7 +199,18 @@ export default async function PipelinePage({
     }
   }
 
-  // 🚨 DEFINE SORT OPTIONS SPECIFIC TO DEALS
+  // 🚨 DEFINE SFA FILTERS AND SORT OPTIONS
+  const dealFilters: FilterConfig[] = [
+    {
+      key: "dealType",
+      label: "Deal Type",
+      options: [
+        { label: "New Business", value: "NEW_BUSINESS" },
+        { label: "Existing Business", value: "EXISTING_BUSINESS" },
+      ],
+    },
+  ];
+
   const dealSortOptions = [
     { label: "Recently Updated", value: "updated" },
     { label: "Largest Amount", value: "amount_desc" },
@@ -207,7 +225,6 @@ export default async function PipelinePage({
     resolvedParams,
   );
 
-  // Safely build search params to keep filters active during pagination
   const buildPageUrl = (pageNumber: number) => {
     const params = new URLSearchParams();
     Object.entries(resolvedParams).forEach(([key, value]) => {
@@ -218,9 +235,7 @@ export default async function PipelinePage({
   };
 
   return (
-    // Forced height to fit screen perfectly minus header padding
     <div className="p-6 md:p-8 flex flex-col h-[calc(100vh-4rem)] animate-in fade-in duration-500">
-      {/* Header - shrink-0 ensures it never gets squished */}
       <div className="flex justify-between items-center mb-6 shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Deal Pipeline</h1>
@@ -239,16 +254,15 @@ export default async function PipelinePage({
         </Link>
       </div>
 
-      {/* 🚨 THE UNIVERSAL FILTER COMPONENT (shrink-0 prevents squishing) */}
       <div className="shrink-0 mb-4">
         <DataFilters
           searchPlaceholder="Search deals by name..."
+          filters={dealFilters}
           ownerOptions={ownerOptions}
           sortOptions={dealSortOptions}
         />
       </div>
 
-      {/* Kanban Board Container - flex-1 and min-h-0 forces it to stay inside bounds */}
       <div className="flex-1 min-h-0 bg-slate-100 rounded-xl overflow-hidden">
         {deals.length === 0 && currentPage === 1 ? (
           <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-12 text-center text-slate-400 h-full flex items-center justify-center">
@@ -261,39 +275,13 @@ export default async function PipelinePage({
         )}
       </div>
 
-      {/* Pagination Controls - shrink-0 keeps it at the bottom */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-6 shrink-0">
-          {currentPage > 1 ? (
-            <Link
-              href={buildPageUrl(currentPage - 1)}
-              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-            >
-              &larr; Previous
-            </Link>
-          ) : (
-            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-              &larr; Previous
-            </span>
-          )}
-          <span className="text-slate-500 text-sm font-medium">
-            Page <span className="text-slate-800 font-bold">{currentPage}</span>{" "}
-            of {totalPages}
-          </span>
-          {currentPage < totalPages ? (
-            <Link
-              href={buildPageUrl(currentPage + 1)}
-              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-            >
-              Next &rarr;
-            </Link>
-          ) : (
-            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-              Next &rarr;
-            </span>
-          )}
-        </div>
-      )}
+      <div className="shrink-0 mt-6">
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          buildPageUrl={buildPageUrl}
+        />
+      </div>
     </div>
   );
 }

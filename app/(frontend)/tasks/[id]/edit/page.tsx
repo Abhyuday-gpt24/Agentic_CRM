@@ -2,32 +2,64 @@ import React from "react";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { authOptions } from "../../../api/auth/[...nextauth]/route";
-import { prisma } from "../../../lib/prisma";
-import { createTask } from "../../../actions/task_action";
+import { authOptions } from "../../../../api/auth/[...nextauth]/route";
+import { prisma } from "../../../../lib/prisma";
+import { updateTask } from "../../../../actions/task_action";
 import { User } from "@prisma/client";
-import { getSecureOwnershipFilter } from "../../../lib/rbac_helpers";
+import { getSecureOwnershipFilter } from "../../../../lib/rbac_helpers";
+
+// ==========================================
+// 1. STRICT TYPES
+// ==========================================
 
 type AuthUserWithTeam = Omit<User, "organizationId"> & {
   organizationId: string;
   teamMembers: User[];
 };
 
-export default async function NewTaskPage() {
+export default async function EditTaskPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
+  // 1. Authenticate User & Fetch Team
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { teamMembers: true },
   });
 
   if (!dbUser || !dbUser.organizationId) redirect("/");
-
   const authUser = dbUser as AuthUserWithTeam;
 
-  const ownershipFilter = getSecureOwnershipFilter(authUser);
+  const resolvedParams = await params;
+  const taskId = resolvedParams.id;
 
+  // 2. Fetch the specific task securely
+  const task = await prisma.task.findUnique({
+    where: {
+      id: taskId,
+      organizationId: authUser.organizationId,
+    },
+  });
+
+  if (!task) redirect("/tasks");
+
+  // 3. RBAC Verification: Can this user edit this task?
+  const isOwner = task.employeeId === authUser.id;
+  const isManager = authUser.role === "ADMIN" || authUser.role === "MANAGER";
+  const isTeamMember = authUser.teamMembers.some(
+    (tm) => tm.id === task.employeeId,
+  );
+
+  if (!isOwner && !isManager && !isTeamMember) {
+    redirect("/tasks"); // Unauthorized
+  }
+
+  // 4. Get dynamic ownership filter for the Contacts Dropdown
+  const ownershipFilter = getSecureOwnershipFilter(authUser);
   const contacts = await prisma.contact.findMany({
     where: {
       organizationId: authUser.organizationId,
@@ -36,7 +68,7 @@ export default async function NewTaskPage() {
     orderBy: { name: "asc" },
   });
 
-  // 🚨 Determine who this user is allowed to assign tasks to
+  // 🚨 5. Determine who this user is allowed to assign tasks to (For Reassignment)
   let assignableUsers: { id: string; name: string }[] = [];
 
   if (authUser.role === "ADMIN") {
@@ -59,6 +91,14 @@ export default async function NewTaskPage() {
     ];
   }
 
+  // 6. Bind the Server Action
+  const updateAction = updateTask.bind(null, task.id);
+
+  // Format due date for HTML input (YYYY-MM-DD)
+  const formattedDueDate = task.dueDate
+    ? task.dueDate.toISOString().split("T")[0]
+    : "";
+
   return (
     <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
@@ -80,11 +120,11 @@ export default async function NewTaskPage() {
             />
           </svg>
         </Link>
-        <h1 className="text-2xl font-bold text-slate-800">Create New Task</h1>
+        <h1 className="text-2xl font-bold text-slate-800">Edit Task</h1>
       </div>
 
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-6 md:p-8">
-        <form action={createTask} className="space-y-8">
+        <form action={updateAction} className="space-y-8">
           <div>
             <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
               Action Items
@@ -104,25 +144,25 @@ export default async function NewTaskPage() {
                   type="text"
                   id="title"
                   name="title"
+                  defaultValue={task.title}
                   required
-                  placeholder="e.g. Follow up on Q3 Proposal"
                   className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
               </div>
 
-              {/* 🚨 Task Assignment Dropdown (Only shows for Admins & Managers) */}
+              {/* 🚨 Re-assignment Dropdown (Only shows for Admins & Managers) */}
               {(authUser.role === "ADMIN" || authUser.role === "MANAGER") && (
                 <div>
                   <label
                     htmlFor="employeeId"
                     className="block text-sm font-medium text-slate-300 mb-2"
                   >
-                    Assign Task To
+                    Assigned To
                   </label>
                   <select
                     id="employeeId"
                     name="employeeId"
-                    defaultValue={authUser.id}
+                    defaultValue={task.employeeId}
                     className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   >
                     {assignableUsers.map((user) => (
@@ -147,6 +187,7 @@ export default async function NewTaskPage() {
                   type="date"
                   id="dueDate"
                   name="dueDate"
+                  defaultValue={formattedDueDate}
                   className="w-full bg-[#1E2532] border border-slate-600 text-slate-300 rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 [color-scheme:dark]"
                 />
               </div>
@@ -161,6 +202,7 @@ export default async function NewTaskPage() {
                 <select
                   id="clientId"
                   name="clientId"
+                  defaultValue={task.clientId || ""}
                   className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="">General Task / No specific record</option>
@@ -174,7 +216,7 @@ export default async function NewTaskPage() {
               </div>
             </div>
 
-            <div>
+            <div className="mb-6">
               <label
                 htmlFor="description"
                 className="block text-sm font-medium text-slate-300 mb-2"
@@ -185,9 +227,24 @@ export default async function NewTaskPage() {
                 id="description"
                 name="description"
                 rows={4}
-                placeholder="Any specific details, links, or instructions for this task?"
+                defaultValue={task.description || ""}
                 className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
               />
+            </div>
+
+            {/* Status Toggle Switch */}
+            <div className="flex items-center bg-[#1E2532] border border-slate-600 rounded-lg p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="isCompleted"
+                  defaultChecked={task.isCompleted}
+                  className="w-5 h-5 rounded border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-slate-800 bg-slate-700"
+                />
+                <span className="text-sm font-medium text-slate-300">
+                  Mark Task as Completed
+                </span>
+              </label>
             </div>
           </div>
 
@@ -200,9 +257,9 @@ export default async function NewTaskPage() {
             </Link>
             <button
               type="submit"
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg active:scale-95"
+              className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition shadow-lg active:scale-95"
             >
-              Save Task
+              Save Changes
             </button>
           </div>
         </form>

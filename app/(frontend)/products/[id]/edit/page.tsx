@@ -44,7 +44,7 @@ export default async function EditProductPage({
   const updateAction = updateProduct.bind(null, product.id);
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto w-full animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
           href="/products"
@@ -64,95 +64,106 @@ export default async function EditProductPage({
             />
           </svg>
         </Link>
-        <h1 className="text-2xl font-bold text-slate-800">Edit Product</h1>
+        <h1 className="text-2xl font-bold text-slate-800">
+          Edit Product: {product.name}
+        </h1>
       </div>
 
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-6 md:p-8">
-        <form action={updateAction} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label
-                htmlFor="name"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Product Name *
-              </label>
-              <input
-                type="text"
-                id="name"
-                name="name"
-                defaultValue={product.name}
-                required
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="price"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                Price ($) *
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                id="price"
-                name="price"
-                defaultValue={product.price}
-                required
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
-            <div>
-              <label
-                htmlFor="sku"
-                className="block text-sm font-medium text-slate-300 mb-2"
-              >
-                SKU / Item Code
-              </label>
-              <input
-                type="text"
-                id="sku"
-                name="sku"
-                defaultValue={product.sku || ""}
-                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-
-            {/* 🚨 Status Toggle Switch */}
-            <div className="flex items-center bg-[#1E2532] border border-slate-600 rounded-lg p-3 h-[50px]">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  name="isActive"
-                  defaultChecked={product.isActive}
-                  className="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-800 bg-slate-700"
-                />
-                <span className="text-sm font-medium text-slate-300">
-                  Product is Active
-                </span>
-              </label>
-            </div>
-          </div>
-
+        <form action={updateAction} className="space-y-8">
+          {/* SECTION: Catalog Details */}
           <div>
-            <label
-              htmlFor="description"
-              className="block text-sm font-medium text-slate-300 mb-2"
-            >
-              Description
-            </label>
-            <textarea
-              id="description"
-              name="description"
-              rows={3}
-              defaultValue={product.description || ""}
-              className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-            />
+            <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
+              Catalog Details
+            </h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <label
+                  htmlFor="name"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Product Name *
+                </label>
+                <input
+                  type="text"
+                  id="name"
+                  name="name"
+                  defaultValue={product.name}
+                  required
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="price"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  Price ($) *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="price"
+                  name="price"
+                  defaultValue={product.price}
+                  required
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div>
+                <label
+                  htmlFor="sku"
+                  className="block text-sm font-medium text-slate-300 mb-2"
+                >
+                  SKU / Item Code
+                </label>
+                <input
+                  type="text"
+                  id="sku"
+                  name="sku"
+                  defaultValue={product.sku || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* 🚨 Status Toggle Switch */}
+              <div className="flex flex-col justify-end">
+                <div className="flex items-center bg-[#1E2532] border border-slate-600 rounded-lg p-3 h-[50px]">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="isActive"
+                      defaultChecked={product.isActive}
+                      className="w-5 h-5 rounded border-slate-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-800 bg-slate-700"
+                    />
+                    <span className="text-sm font-medium text-slate-300">
+                      Product is Active
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="description"
+                className="block text-sm font-medium text-slate-300 mb-2"
+              >
+                Description
+              </label>
+              <textarea
+                id="description"
+                name="description"
+                rows={3}
+                defaultValue={product.description || ""}
+                className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-3 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+              />
+            </div>
           </div>
 
           <div className="pt-4 flex justify-end gap-3 border-t border-slate-700/50">
@@ -164,7 +175,7 @@ export default async function EditProductPage({
             </Link>
             <button
               type="submit"
-              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg active:scale-95"
+              className="bg-emerald-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition shadow-lg active:scale-95"
             >
               Save Changes
             </button>

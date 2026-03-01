@@ -6,6 +6,12 @@ import { authOptions } from "../../../../api/auth/[...nextauth]/route";
 import { prisma } from "../../../../lib/prisma";
 import { updateDeal } from "../../../../actions/deals_action";
 import DealItemsManager from "../../../components/deal_items_manager";
+import { User } from "@prisma/client";
+
+type AuthUserWithTeam = Omit<User, "organizationId"> & {
+  organizationId: string;
+  teamMembers: User[];
+};
 
 export default async function EditDealPage({
   params,
@@ -15,13 +21,14 @@ export default async function EditDealPage({
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
-  // 1. Authenticate User
+  // 1. Authenticate User & Fetch Team
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { teamMembers: true },
   });
 
   if (!dbUser || !dbUser.organizationId) redirect("/");
+  const authUser = dbUser as AuthUserWithTeam;
 
   const resolvedParams = await params;
   const dealId = resolvedParams.id;
@@ -30,10 +37,10 @@ export default async function EditDealPage({
   const deal = await prisma.deal.findUnique({
     where: {
       id: dealId,
-      organizationId: dbUser.organizationId,
+      organizationId: authUser.organizationId,
     },
     include: {
-      dealItems: true, // We need the attached products!
+      dealItems: true,
       contact: { select: { name: true } },
       company: { select: { name: true } },
     },
@@ -41,37 +48,59 @@ export default async function EditDealPage({
 
   if (!deal) redirect("/pipeline");
 
-  // 3. RBAC Verification (Mirroring our secure server actions)
-  const isOwner = deal.employeeId === dbUser.id;
-  const isManager = dbUser.role === "ADMIN" || dbUser.role === "MANAGER";
-  const isTeamMember = dbUser.teamMembers.some(
+  // 3. RBAC Verification
+  const isOwner = deal.employeeId === authUser.id;
+  const isManager = authUser.role === "ADMIN" || authUser.role === "MANAGER";
+  const isTeamMember = authUser.teamMembers.some(
     (tm) => tm.id === deal.employeeId,
   );
 
   if (!isOwner && !isManager && !isTeamMember) {
-    redirect("/pipeline"); // Unauthorized
+    redirect("/pipeline");
   }
 
-  // 4. Fetch the Active Product Catalog for the dropdown
+  // 🚨 4. Determine Assignable Users for Reassignment
+  let assignableUsers: { id: string; name: string }[] = [];
+
+  if (authUser.role === "ADMIN") {
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: authUser.organizationId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    assignableUsers = allUsers.map((u) => ({
+      id: u.id,
+      name: u.name || "Unknown User",
+    }));
+  } else if (authUser.role === "MANAGER") {
+    assignableUsers = [
+      { id: authUser.id, name: "Me (Self)" },
+      ...authUser.teamMembers.map((u) => ({
+        id: u.id,
+        name: u.name || "Unknown User",
+      })),
+    ];
+  }
+
+  // 5. Fetch the Active Product Catalog
   const catalogProducts = await prisma.product.findMany({
     where: {
-      organizationId: dbUser.organizationId,
-      isActive: true, // Only allow adding active products to new deals
+      organizationId: authUser.organizationId,
+      isActive: true,
     },
     select: { id: true, name: true, price: true },
     orderBy: { name: "asc" },
   });
 
-  // 5. Bind the Server Action
+  // 6. Bind the Server Action
   const updateAction = updateDeal.bind(null, deal.id);
 
-  // Format close date for the HTML date input (YYYY-MM-DD)
   const formattedCloseDate = deal.closeDate
     ? deal.closeDate.toISOString().split("T")[0]
     : "";
 
   return (
-    <div className="p-6 md:p-8 max-w-5xl mx-auto w-full animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-6xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
           href="/pipeline"
@@ -124,60 +153,153 @@ export default async function EditDealPage({
                 />
               </div>
 
-              <div>
-                <label
-                  htmlFor="stage"
-                  className="block text-sm font-medium text-slate-300 mb-1"
-                >
-                  Pipeline Stage *
-                </label>
-                <select
-                  id="stage"
-                  name="stage"
-                  defaultValue={deal.stage}
-                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
-                >
-                  <option value="DISCOVERY">Discovery</option>
-                  <option value="PROPOSAL">Proposal</option>
-                  <option value="NEGOTIATION">Negotiation</option>
-                  <option value="WON">Closed Won</option>
-                  <option value="LOST">Closed Lost</option>
-                </select>
+              {/* 🚨 New Deal Owner Dropdown (Delegation) */}
+              {(authUser.role === "ADMIN" || authUser.role === "MANAGER") && (
+                <div>
+                  <label
+                    htmlFor="employeeId"
+                    className="block text-sm font-medium text-slate-300 mb-1"
+                  >
+                    Deal Owner
+                  </label>
+                  <select
+                    id="employeeId"
+                    name="employeeId"
+                    defaultValue={deal.employeeId}
+                    className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                  >
+                    {assignableUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="stage"
+                    className="block text-sm font-medium text-slate-300 mb-1"
+                  >
+                    Pipeline Stage *
+                  </label>
+                  <select
+                    id="stage"
+                    name="stage"
+                    defaultValue={deal.stage}
+                    className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="DISCOVERY">Discovery</option>
+                    <option value="PROPOSAL">Proposal</option>
+                    <option value="NEGOTIATION">Negotiation</option>
+                    <option value="WON">Closed Won</option>
+                    <option value="LOST">Closed Lost</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="dealType"
+                    className="block text-sm font-medium text-slate-300 mb-1"
+                  >
+                    Deal Type
+                  </label>
+                  <select
+                    id="dealType"
+                    name="dealType"
+                    defaultValue={deal.dealType || ""}
+                    className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                  >
+                    <option value="">-- Select --</option>
+                    <option value="NEW_BUSINESS">New Biz</option>
+                    <option value="EXISTING_BUSINESS">Existing</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="probability"
+                    className="block text-sm font-medium text-slate-300 mb-1"
+                  >
+                    Probability (%)
+                  </label>
+                  <input
+                    type="number"
+                    id="probability"
+                    name="probability"
+                    min="0"
+                    max="100"
+                    defaultValue={
+                      deal.probability !== null ? deal.probability : ""
+                    }
+                    className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="closeDate"
+                    className="block text-sm font-medium text-slate-300 mb-1"
+                  >
+                    Close Date
+                  </label>
+                  <input
+                    type="date"
+                    id="closeDate"
+                    name="closeDate"
+                    defaultValue={formattedCloseDate}
+                    className="w-full bg-[#1E2532] border border-slate-600 text-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm [color-scheme:dark]"
+                  />
+                </div>
               </div>
 
               <div>
                 <label
-                  htmlFor="closeDate"
+                  htmlFor="nextStep"
                   className="block text-sm font-medium text-slate-300 mb-1"
                 >
-                  Expected Close Date
+                  Next Step
                 </label>
                 <input
-                  type="date"
-                  id="closeDate"
-                  name="closeDate"
-                  defaultValue={formattedCloseDate}
-                  className="w-full bg-[#1E2532] border border-slate-600 text-slate-300 rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm [color-scheme:dark]"
+                  type="text"
+                  id="nextStep"
+                  name="nextStep"
+                  placeholder="What happens next?"
+                  defaultValue={deal.nextStep || ""}
+                  className="w-full bg-[#1E2532] border border-slate-600 text-white rounded-lg p-2.5 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
                 />
               </div>
 
-              {/* Read-Only Grand Total (Calculated by Line Items) */}
+              {/* Calculated Value Display */}
               <div className="pt-4 border-t border-slate-700/50 mt-4">
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Calculated Value
+                  Total Deal Value
                 </label>
-                <p className="text-2xl font-bold text-emerald-400">
+                <p className="text-2xl font-bold text-white">
                   $
                   {deal.amount.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
+                    minimumFractionDigits: 0,
                   })}
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Updates automatically via Line Items.
-                </p>
+
+                <div className="flex justify-between items-center mt-2 bg-[#1E2532] p-2 rounded-lg border border-slate-700">
+                  <span className="text-xs font-medium text-slate-400">
+                    Expected Revenue
+                  </span>
+                  <span className="text-sm font-bold text-emerald-400">
+                    $
+                    {(deal.expectedRevenue || 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 0,
+                    })}
+                  </span>
+                </div>
               </div>
 
-              <div className="pt-6">
+              <div className="pt-4">
                 <button
                   type="submit"
                   className="w-full bg-blue-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition shadow-lg active:scale-95"
@@ -189,7 +311,7 @@ export default async function EditDealPage({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: The Deal Items Manager */}
+        {/* RIGHT COLUMN: Deal Items Manager */}
         <div className="lg:col-span-2">
           <DealItemsManager
             dealId={deal.id}

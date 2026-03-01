@@ -27,7 +27,7 @@ async function getAuthenticatedUser(): Promise<AuthUserWithTeam> {
   return dbUser as AuthUserWithTeam;
 }
 
-// 🚨 SECURE RBAC CHECKER FOR DEALS (Matches deals_action.ts perfectly)
+// 🚨 SECURE RBAC CHECKER FOR DEALS
 async function verifyDealAccess(dealId: string, currentUser: AuthUserWithTeam) {
   const targetDeal = await prisma.deal.findUnique({
     where: {
@@ -63,8 +63,16 @@ async function verifyDealAccess(dealId: string, currentUser: AuthUserWithTeam) {
   return targetDeal;
 }
 
-// Internal helper to automatically sum up all items and update the Deal Amount
+// Internal helper to automatically sum up all items and update the Deal Amount AND Expected Revenue
 async function recalculateDealTotal(dealId: string) {
+  // Get the current deal to find its probability
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    select: { probability: true },
+  });
+
+  if (!deal) return;
+
   const aggregation = await prisma.dealItem.aggregate({
     where: { dealId },
     _sum: { totalPrice: true },
@@ -72,9 +80,16 @@ async function recalculateDealTotal(dealId: string) {
 
   const newTotal = aggregation._sum.totalPrice || 0;
 
+  // 🚨 Recalculate Expected Revenue based on the new total!
+  const newExpectedRevenue =
+    deal.probability !== null ? newTotal * (deal.probability / 100) : null;
+
   await prisma.deal.update({
     where: { id: dealId },
-    data: { amount: newTotal },
+    data: {
+      amount: newTotal,
+      expectedRevenue: newExpectedRevenue,
+    },
   });
 }
 
@@ -99,12 +114,11 @@ export async function addDealItem(dealId: string, formData: FormData) {
   let unitPrice = customPrice;
 
   // 2. If a catalog product is selected, fetch its exact current price and name
-  // This securely prevents malicious users from spoofing the price via HTML manipulation
   if (productId) {
     const catalogProduct = await prisma.product.findUnique({
       where: {
         id: productId,
-        organizationId: dbUser.organizationId, // Tenant boundary check
+        organizationId: dbUser.organizationId,
       },
     });
 
@@ -128,7 +142,7 @@ export async function addDealItem(dealId: string, formData: FormData) {
     },
   });
 
-  // 4. Recalculate the grand total
+  // 4. Recalculate the grand total AND expected revenue
   await recalculateDealTotal(dealId);
 
   // 5. Revalidate caches so the UI updates instantly
@@ -139,10 +153,8 @@ export async function addDealItem(dealId: string, formData: FormData) {
 export async function removeDealItem(dealId: string, itemId: string) {
   const dbUser = await getAuthenticatedUser();
 
-  // 1. Ensure the user has permission to edit this specific deal
   await verifyDealAccess(dealId, dbUser);
 
-  // 2. Ensure the item actually belongs to this deal before deleting
   await prisma.dealItem.deleteMany({
     where: {
       id: itemId,
@@ -150,10 +162,8 @@ export async function removeDealItem(dealId: string, itemId: string) {
     },
   });
 
-  // 3. Recalculate the grand total
   await recalculateDealTotal(dealId);
 
-  // 4. Revalidate caches
   revalidatePath(`/pipeline`);
   revalidatePath(`/pipeline/${dealId}`);
 }

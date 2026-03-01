@@ -5,8 +5,8 @@ import { authOptions } from "../api/auth/[...nextauth]/route";
 import { prisma } from "../lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-// 🚨 Import the centralized type
 import { AuthUserWithTeam } from "../lib/rbac_helpers";
+import { AccountType } from "@prisma/client";
 
 // ==========================================
 // 1. REUSABLE AUTH HELPER
@@ -28,7 +28,7 @@ async function getAuthenticatedUser(): Promise<AuthUserWithTeam> {
   return dbUser as AuthUserWithTeam;
 }
 
-// 🚨 COMPANY RBAC CHECKER (Keep this specific to the action file)
+// 🚨 COMPANY RBAC CHECKER
 async function verifyCompanyAccess(
   companyId: string,
   currentUser: AuthUserWithTeam,
@@ -53,28 +53,63 @@ async function verifyCompanyAccess(
 }
 
 // ==========================================
+// INTERNAL HELPER TO PARSE SFA FORM DATA
+// ==========================================
+function extractCompanySfaFields(formData: FormData) {
+  const rawAnnualRevenue = formData.get("annualRevenue") as string;
+  const rawType = formData.get("type") as string;
+
+  return {
+    name: formData.get("name") as string,
+    type: (rawType as AccountType) || AccountType.PROSPECT,
+    website: (formData.get("website") as string) || null,
+    phone: (formData.get("phone") as string) || null,
+
+    industry: (formData.get("industry") as string) || null,
+    employeeCount: (formData.get("employeeCount") as string) || null,
+    annualRevenue: rawAnnualRevenue ? parseFloat(rawAnnualRevenue) : null,
+    tickerSymbol: (formData.get("tickerSymbol") as string) || null,
+
+    billingStreet: (formData.get("billingStreet") as string) || null,
+    billingCity: (formData.get("billingCity") as string) || null,
+    billingState: (formData.get("billingState") as string) || null,
+    billingZip: (formData.get("billingZip") as string) || null,
+    billingCountry: (formData.get("billingCountry") as string) || null,
+  };
+}
+
+// ==========================================
 // 2. COMPANY ACTIONS
 // ==========================================
 
 export async function createCompany(formData: FormData) {
   const dbUser = await getAuthenticatedUser();
-
-  const name = formData.get("name") as string;
-  const industry = formData.get("industry") as string;
-  const website = formData.get("website") as string;
-  const employeeCount = formData.get("employeeCount") as string;
+  const data = extractCompanySfaFields(formData);
 
   await prisma.company.create({
     data: {
-      name,
-      industry: industry || null,
-      website: website || null,
-      employeeCount: employeeCount || null,
+      ...data,
       organizationId: dbUser.organizationId,
     },
   });
 
   revalidatePath("/companies");
+  redirect("/companies");
+}
+
+export async function updateCompany(id: string, formData: FormData) {
+  const dbUser = await getAuthenticatedUser();
+  await verifyCompanyAccess(id, dbUser); // Ensure they have access
+
+  const data = extractCompanySfaFields(formData);
+
+  await prisma.company.update({
+    where: { id },
+    data: data,
+  });
+
+  revalidatePath("/companies");
+  revalidatePath(`/companies/${id}`); // Helpful if you add a detail page later
   redirect("/companies");
 }
 

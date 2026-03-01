@@ -8,6 +8,7 @@ import { toggleTaskCompletion, deleteTask } from "../../actions/task_action";
 import { User, Prisma } from "@prisma/client";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
 import DataFilters, { FilterConfig } from "../components/data_filters";
+import Pagination from "../components/pagination";
 
 // ==========================================
 // 1. STRICT TYPES & CONSTANTS
@@ -36,12 +37,10 @@ async function getPaginatedTasks(
 ) {
   const skipAmount = (currentPage - 1) * TASKS_PER_PAGE;
 
-  // 1. Base Tenant Security
   const whereClause: Prisma.TaskWhereInput = {
     organizationId: dbUser.organizationId,
   };
 
-  // 2. Text Search (Title or Description)
   if (searchParams.q) {
     whereClause.OR = [
       { title: { contains: searchParams.q, mode: "insensitive" } },
@@ -49,12 +48,10 @@ async function getPaginatedTasks(
     ];
   }
 
-  // 3. Status Filter
   if (searchParams.status && searchParams.status !== "ALL") {
     whereClause.isCompleted = searchParams.status === "COMPLETED";
   }
 
-  // 4. Date Filtering
   if (searchParams.dateRange && searchParams.dateRange !== "ALL") {
     const now = new Date();
     const startDate = new Date();
@@ -68,7 +65,6 @@ async function getPaginatedTasks(
     whereClause.createdAt = { gte: startDate };
   }
 
-  // 5. 🚨 MULTI-SELECT OWNER FILTER + STRICT RBAC VERIFICATION 🚨
   if (searchParams.ownerId && searchParams.ownerId !== "ALL") {
     const requestedIds = searchParams.ownerId.split(",");
     const authorizedIds: string[] = [];
@@ -97,8 +93,6 @@ async function getPaginatedTasks(
     Object.assign(whereClause, getSecureOwnershipFilter(dbUser));
   }
 
-  // 6. Dynamic Sorting Logic
-  // Default sort: Incomplete first, then by earliest due date
   let orderByClause:
     | Prisma.TaskOrderByWithRelationInput
     | Prisma.TaskOrderByWithRelationInput[] = [
@@ -123,7 +117,6 @@ async function getPaginatedTasks(
     }
   }
 
-  // 7. Execute Queries in Parallel
   const [tasks, totalTasks] = await Promise.all([
     prisma.task.findMany({
       where: whereClause,
@@ -161,7 +154,6 @@ export default async function TasksPage({
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
-  // Fetch User & Team (Required for Manager RBAC)
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { teamMembers: true },
@@ -173,7 +165,6 @@ export default async function TasksPage({
   const resolvedParams = await searchParams;
   const currentPage = parseInt(resolvedParams.page || "1", 10);
 
-  // 🚨 1. DEFINE PAGE-SPECIFIC FILTERS
   const pageFilters: FilterConfig[] = [
     {
       key: "status",
@@ -185,7 +176,6 @@ export default async function TasksPage({
     },
   ];
 
-  // 🚨 2. FETCH RAW OWNER OPTIONS
   let ownerOptions: { label: string; value: string }[] | undefined = undefined;
 
   if (authUser.role === "ADMIN" || authUser.role === "MANAGER") {
@@ -212,7 +202,6 @@ export default async function TasksPage({
     }
   }
 
-  // 🚨 3. DEFINE SORT OPTIONS FOR TASKS
   const taskSortOptions = [
     { label: "Earliest Due", value: "due_asc" },
     { label: "Latest Due", value: "due_desc" },
@@ -226,22 +215,17 @@ export default async function TasksPage({
     resolvedParams,
   );
 
-  // Safely build search params to keep filters active during pagination
   const buildPageUrl = (pageNumber: number) => {
     const params = new URLSearchParams();
-
     Object.entries(resolvedParams).forEach(([key, value]) => {
       if (value) params.set(key, value);
     });
-
     params.set("page", pageNumber.toString());
-
     return `/tasks?${params.toString()}`;
   };
 
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto w-full animate-in fade-in duration-500">
-      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Tasks</h1>
@@ -260,7 +244,6 @@ export default async function TasksPage({
         </Link>
       </div>
 
-      {/* 🚨 THE UNIVERSAL FILTER COMPONENT */}
       <DataFilters
         searchPlaceholder="Search tasks by title or description..."
         filters={pageFilters}
@@ -268,7 +251,6 @@ export default async function TasksPage({
         sortOptions={taskSortOptions}
       />
 
-      {/* Main Task List Area */}
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 overflow-hidden">
         {tasks.length === 0 ? (
           <div className="p-12 text-center text-slate-400 italic">
@@ -291,7 +273,7 @@ export default async function TasksPage({
                 new Date(task.dueDate) < new Date() &&
                 !task.isCompleted;
 
-              const canDelete =
+              const canModify =
                 authUser.role === "ADMIN" ||
                 authUser.role === "MANAGER" ||
                 task.employeeId === authUser.id;
@@ -303,7 +285,6 @@ export default async function TasksPage({
                     task.isCompleted ? "opacity-50" : ""
                   }`}
                 >
-                  {/* The Interactive Checkbox */}
                   <form action={toggleAction} className="mt-1">
                     <button
                       type="submit"
@@ -331,11 +312,7 @@ export default async function TasksPage({
 
                   <div className="flex-1">
                     <h3
-                      className={`text-base font-medium ${
-                        task.isCompleted
-                          ? "line-through text-slate-500"
-                          : "text-white"
-                      }`}
+                      className={`text-base font-medium ${task.isCompleted ? "line-through text-slate-500" : "text-white"}`}
                     >
                       {task.title}
                     </h3>
@@ -370,13 +347,12 @@ export default async function TasksPage({
                     </div>
                   </div>
 
-                  {/* Delete Button (Only visible if they have permissions) */}
-                  {canDelete && (
-                    <form action={deleteAction}>
-                      <button
-                        type="submit"
-                        className="text-slate-600 hover:text-red-400 transition p-2 opacity-0 group-hover:opacity-100"
-                        title="Delete Task"
+                  {canModify && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Link
+                        href={`/tasks/${task.id}/edit`}
+                        className="text-slate-600 hover:text-blue-400 transition p-2"
+                        title="Edit Task"
                       >
                         <svg
                           className="w-4 h-4"
@@ -388,11 +364,33 @@ export default async function TasksPage({
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
                           />
                         </svg>
-                      </button>
-                    </form>
+                      </Link>
+
+                      <form action={deleteAction}>
+                        <button
+                          type="submit"
+                          className="text-slate-600 hover:text-red-400 transition p-2"
+                          title="Delete Task"
+                        >
+                          <svg
+                            className="w-4 h-4"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                            />
+                          </svg>
+                        </button>
+                      </form>
+                    </div>
                   )}
                 </div>
               );
@@ -401,41 +399,11 @@ export default async function TasksPage({
         )}
       </div>
 
-      {/* 🚨 Pagination Controls */}
-      {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-8">
-          {currentPage > 1 ? (
-            <Link
-              href={buildPageUrl(currentPage - 1)}
-              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-            >
-              &larr; Previous
-            </Link>
-          ) : (
-            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-              &larr; Previous
-            </span>
-          )}
-
-          <span className="text-slate-400 text-sm font-medium">
-            Page <span className="text-white">{currentPage}</span> of{" "}
-            {totalPages}
-          </span>
-
-          {currentPage < totalPages ? (
-            <Link
-              href={buildPageUrl(currentPage + 1)}
-              className="px-4 py-2 bg-[#242E3D] text-white text-sm font-semibold rounded-lg border border-slate-700 hover:bg-slate-800 transition shadow-sm"
-            >
-              Next &rarr;
-            </Link>
-          ) : (
-            <span className="px-4 py-2 bg-[#1E2532] text-slate-600 text-sm font-semibold rounded-lg border border-slate-800 cursor-not-allowed">
-              Next &rarr;
-            </span>
-          )}
-        </div>
-      )}
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        buildPageUrl={buildPageUrl}
+      />
     </div>
   );
 }

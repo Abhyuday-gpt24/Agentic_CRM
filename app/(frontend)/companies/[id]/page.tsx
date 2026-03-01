@@ -4,17 +4,34 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../api/auth/[...nextauth]/route";
 import { prisma } from "../../../lib/prisma";
-import { User } from "@prisma/client";
+import { User, AccountType } from "@prisma/client";
 import { getSecureOwnershipFilter } from "../../../lib/rbac_helpers";
 
 // ==========================================
-// 1. STRICT TYPES
+// 1. STRICT TYPES & HELPERS
 // ==========================================
 
 type AuthUserWithTeam = Omit<User, "organizationId"> & {
   organizationId: string;
   teamMembers: User[];
 };
+
+function getTypeColor(type: string) {
+  switch (type) {
+    case "CUSTOMER":
+      return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+    case "PROSPECT":
+      return "bg-blue-500/20 text-blue-400 border-blue-500/30";
+    case "PARTNER":
+      return "bg-purple-500/20 text-purple-400 border-purple-500/30";
+    case "VENDOR":
+      return "bg-orange-500/20 text-orange-400 border-orange-500/30";
+    case "COMPETITOR":
+      return "bg-red-500/20 text-red-400 border-red-500/30";
+    default:
+      return "bg-slate-500/20 text-slate-400 border-slate-500/30";
+  }
+}
 
 export default async function CompanyViewPage({
   params,
@@ -75,14 +92,22 @@ export default async function CompanyViewPage({
     .filter((d) => d.stage === "WON")
     .reduce((sum, deal) => sum + deal.amount, 0);
 
+  // Build a clean location string from the billing fields
+  const locationParts = [
+    company.billingCity,
+    company.billingState,
+    company.billingCountry,
+  ].filter(Boolean);
+  const locationString = locationParts.join(", ");
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
       {/* HEADER: Navigation and Actions */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
+        <div className="flex items-start gap-4">
           <Link
             href="/companies"
-            className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
+            className="p-2 bg-[#242E3D] hover:bg-slate-700 text-slate-300 border border-slate-600 rounded-lg transition mt-1"
             title="Back to Companies"
           >
             <svg
@@ -99,32 +124,66 @@ export default async function CompanyViewPage({
               />
             </svg>
           </Link>
+
           <div>
-            <h1 className="text-2xl font-bold text-slate-800">
-              {company.name}
-            </h1>
-            <div className="text-sm text-slate-500 flex gap-2 items-center mt-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold text-white">{company.name}</h1>
+
+              {/* 🚨 New SFA Fields: Ticker & Account Type */}
+              {company.tickerSymbol && (
+                <span className="text-xs font-mono bg-slate-700/50 border border-slate-600 text-slate-300 px-2 py-1 rounded">
+                  ${company.tickerSymbol.toUpperCase()}
+                </span>
+              )}
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md border ${getTypeColor(company.type)}`}
+              >
+                {company.type}
+              </span>
+            </div>
+
+            {/* 🚨 Firmographics Data Row */}
+            <div className="text-sm text-slate-400 flex flex-wrap gap-x-3 gap-y-1 items-center mt-2">
               {company.industry && <span>{company.industry}</span>}
               {company.industry && company.employeeCount && <span>•</span>}
               {company.employeeCount && (
                 <span>{company.employeeCount} employees</span>
               )}
+              {company.employeeCount && company.annualRevenue && <span>•</span>}
+              {company.annualRevenue && (
+                <span>
+                  ${(company.annualRevenue / 1000000).toFixed(1)}M Revenue
+                </span>
+              )}
+            </div>
+
+            {/* 🚨 Contact Info Row */}
+            <div className="text-sm text-slate-400 flex flex-wrap gap-x-3 gap-y-1 items-center mt-1">
+              {locationString && (
+                <span className="flex items-center gap-1">
+                  📍 {locationString}
+                </span>
+              )}
+              {locationString && company.phone && <span>•</span>}
+              {company.phone && (
+                <span className="flex items-center gap-1">
+                  📞 {company.phone}
+                </span>
+              )}
+              {company.phone && company.website && <span>•</span>}
               {company.website && (
-                <>
-                  <span>•</span>
-                  <a
-                    href={
-                      company.website.startsWith("http")
-                        ? company.website
-                        : `https://${company.website}`
-                    }
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-500 hover:underline"
-                  >
-                    {company.website}
-                  </a>
-                </>
+                <a
+                  href={
+                    company.website.startsWith("http")
+                      ? company.website
+                      : `https://${company.website}`
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-400 hover:text-blue-300 transition flex items-center gap-1"
+                >
+                  🌐 {company.website}
+                </a>
               )}
             </div>
           </div>
@@ -161,7 +220,7 @@ export default async function CompanyViewPage({
               Contacts at {company.name}
             </h3>
             <Link
-              href="/contacts/new"
+              href={`/contacts/new?companyId=${company.id}`}
               className="text-xs text-blue-400 hover:text-blue-300 transition"
             >
               + Add Contact
@@ -181,14 +240,18 @@ export default async function CompanyViewPage({
                   className="block bg-[#1E2532] border border-slate-700 p-4 rounded-xl hover:border-blue-500/50 transition group"
                 >
                   <div className="flex justify-between items-center">
-                    <div>
-                      <h4 className="font-medium text-slate-200 text-sm group-hover:text-blue-400 transition">
+                    <div className="truncate pr-4">
+                      <h4 className="font-medium text-slate-200 text-sm group-hover:text-blue-400 transition truncate">
                         {client.name}
                       </h4>
-                      <p className="text-xs text-slate-500">{client.email}</p>
+                      {/* 🚨 Added Job Title to Contact List */}
+                      <p className="text-xs text-slate-500 truncate">
+                        {client.jobTitle ? `${client.jobTitle} • ` : ""}
+                        {client.email}
+                      </p>
                     </div>
                     <span
-                      className={`px-2 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wider ${client.status === "ACTIVE" || client.status === "WON" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}
+                      className={`px-2 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap ${client.status === "ACTIVE" || client.status === "WON" ? "bg-green-500/20 text-green-400" : "bg-slate-500/20 text-slate-400"}`}
                     >
                       {client.status}
                     </span>
@@ -205,6 +268,12 @@ export default async function CompanyViewPage({
             <h3 className="text-base font-bold text-white">
               Deals & Opportunities
             </h3>
+            <Link
+              href={`/pipeline/new?companyId=${company.id}`}
+              className="text-xs text-blue-400 hover:text-blue-300 transition"
+            >
+              + Add Deal
+            </Link>
           </div>
 
           {company.deals.length === 0 ? (
@@ -218,12 +287,13 @@ export default async function CompanyViewPage({
                 const isLost = deal.stage === "LOST";
 
                 return (
-                  <div
+                  <Link
+                    href={`/pipeline/${deal.id}/edit`}
                     key={deal.id}
-                    className="bg-[#1E2532] border border-slate-700 p-4 rounded-xl"
+                    className="block bg-[#1E2532] border border-slate-700 p-4 rounded-xl hover:border-blue-500/50 transition group"
                   >
                     <div className="flex justify-between items-start mb-2">
-                      <h4 className="font-medium text-slate-200 text-sm">
+                      <h4 className="font-medium text-slate-200 text-sm group-hover:text-blue-400 transition">
                         {deal.name}
                       </h4>
                       <span className="text-sm font-bold text-white">
@@ -246,7 +316,7 @@ export default async function CompanyViewPage({
                         {new Date(deal.createdAt).toLocaleDateString()}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>

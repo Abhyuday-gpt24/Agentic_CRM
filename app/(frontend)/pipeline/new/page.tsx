@@ -37,31 +37,56 @@ export default async function NewDealPage({
 
   const authUser = dbUser as AuthUserWithTeam;
 
-  // 🚨 1. Get the dynamic ownership filter from our central utility
+  // 🚨 1. Determine Assignable Users for Delegation (Admin/Manager Logic)
+  let assignableUsers: { id: string; name: string }[] = [];
+
+  if (authUser.role === "ADMIN") {
+    // Admins can assign to anyone in the entire organization
+    const allUsers = await prisma.user.findMany({
+      where: { organizationId: authUser.organizationId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    assignableUsers = allUsers.map((u) => ({
+      id: u.id,
+      name: u.name || "Unknown User",
+    }));
+  } else if (authUser.role === "MANAGER") {
+    // Managers can assign to themselves or their specific team members
+    assignableUsers = [
+      { id: authUser.id, name: "Me (Self)" },
+      ...authUser.teamMembers.map((u) => ({
+        id: u.id,
+        name: u.name || "Unknown User",
+      })),
+    ];
+  }
+
+  // 🚨 2. Get the dynamic ownership filter for contacts
   const ownershipFilter = getSecureOwnershipFilter(authUser);
 
   // Fetch Contacts, Companies, and Products in parallel for better performance
   const [contacts, companies, products] = await Promise.all([
-    // 🚨 2. Secure the Contacts dropdown so reps only see their own contacts
+    // Secure the Contacts dropdown so reps only see their own contacts
     prisma.contact.findMany({
       where: {
         organizationId: authUser.organizationId,
-        ...ownershipFilter, // Instantly secures the query
+        ...ownershipFilter,
       },
       select: { id: true, name: true, companyId: true },
       orderBy: { name: "asc" },
     }),
-    // Companies remain organization-wide (No ownership filter needed)
+    // Companies remain organization-wide
     prisma.company.findMany({
       where: { organizationId: authUser.organizationId },
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
-    // Products remain organization-wide (No ownership filter needed)
+    // Products remain organization-wide
     prisma.product.findMany({
       where: {
         organizationId: authUser.organizationId,
-        isActive: true, // Only show products you are currently selling
+        isActive: true,
       },
       select: { id: true, name: true, price: true },
       orderBy: { name: "asc" },
@@ -69,7 +94,7 @@ export default async function NewDealPage({
   ]);
 
   return (
-    <div className="p-6 md:p-8 max-w-3xl mx-auto w-full animate-in fade-in duration-500">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
           href="/pipeline"
@@ -96,9 +121,12 @@ export default async function NewDealPage({
         <DealForm
           contacts={contacts}
           companies={companies}
-          products={products} // 🚨 Pass the fetched products to the client component
+          products={products}
           initialCompanyId={companyId}
           initialClientId={clientId}
+          // 🚨 PASSING DELEGATION PROPS
+          assignableUsers={assignableUsers}
+          currentUserId={authUser.id}
         />
       </div>
     </div>

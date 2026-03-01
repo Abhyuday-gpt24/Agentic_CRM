@@ -20,7 +20,6 @@ async function getReportData(
   dbUser: AuthUserWithTeam,
   searchParams: { dateRange?: string; ownerId?: string; q?: string },
 ) {
-  // 1. 🚨 FIXED: Use functional resolution for Date Filtering to avoid type errors
   const resolveDateFilter = () => {
     if (searchParams.dateRange && searchParams.dateRange !== "ALL") {
       const now = new Date();
@@ -37,7 +36,6 @@ async function getReportData(
     return {};
   };
 
-  // 2. 🚨 FIXED: Use functional resolution for Owner Filtering to eliminate 'any'
   const resolveOwnerFilter = () => {
     if (searchParams.ownerId && searchParams.ownerId !== "ALL") {
       const requestedIds = searchParams.ownerId.split(",");
@@ -58,19 +56,15 @@ async function getReportData(
         }
       }
 
-      if (authorizedIds.length > 0) {
+      if (authorizedIds.length > 0)
         return { employeeId: { in: authorizedIds } };
-      }
     }
-    // Fallback to strict ownership if 'ALL' is selected or requested IDs are blocked
     return getSecureOwnershipFilter(dbUser);
   };
 
-  // Execute the functions so TypeScript can perfectly infer the shapes!
   const dateFilter = resolveDateFilter();
   const ownerFilter = resolveOwnerFilter();
 
-  // 3. Build specific where clauses for each model
   const dealWhere: Prisma.DealWhereInput = {
     organizationId: dbUser.organizationId,
     ...ownerFilter,
@@ -98,9 +92,12 @@ async function getReportData(
       : {}),
   };
 
-  // 4. Execute all three secure queries concurrently
   return await Promise.all([
-    prisma.deal.findMany({ where: dealWhere }),
+    // 🚨 We include Company here so we can analyze Deal Accounts!
+    prisma.deal.findMany({
+      where: dealWhere,
+      include: { company: { select: { type: true } } },
+    }),
     prisma.task.findMany({ where: taskWhere }),
     prisma.contact.count({ where: contactWhere }),
   ]);
@@ -114,11 +111,9 @@ export default async function ReportsPage({
 }: {
   searchParams: Promise<{ dateRange?: string; ownerId?: string; q?: string }>;
 }) {
-  // 1. Authenticate and get User
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
-  // Fetch User & Team (Required for Manager RBAC)
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { teamMembers: true },
@@ -129,12 +124,10 @@ export default async function ReportsPage({
   const authUser = dbUser as AuthUserWithTeam;
   const resolvedParams = await searchParams;
 
-  // 2. FETCH RAW OWNER OPTIONS FOR THE HYBRID INJECTOR
   let ownerOptions: { label: string; value: string }[] | undefined = undefined;
 
   if (authUser.role === "ADMIN" || authUser.role === "MANAGER") {
     ownerOptions = [{ label: "Me Only", value: authUser.id }];
-
     if (authUser.role === "ADMIN") {
       const allUsers = await prisma.user.findMany({
         where: { organizationId: authUser.organizationId },
@@ -156,20 +149,23 @@ export default async function ReportsPage({
     }
   }
 
-  // 3. Fetch the dynamically filtered data
   const [deals, tasks, clients] = await getReportData(authUser, resolvedParams);
 
-  // 4. Calculate Key Metrics based ONLY on what the user is allowed to see
+  // 🚨 SFA Deal Calculations
   let totalRevenue = 0;
   let pipelineValue = 0;
+  let expectedPipelineValue = 0; // The new weighted forecast!
   let wonDeals = 0;
   let lostDeals = 0;
 
-  // Pipeline Stage Aggregation
+  let newBusinessValue = 0;
+  let existingBusinessValue = 0;
+
+  // Pipeline Stage Aggregation (Now tracking expected revenue too!)
   const stages = {
-    DISCOVERY: { count: 0, value: 0 },
-    PROPOSAL: { count: 0, value: 0 },
-    NEGOTIATION: { count: 0, value: 0 },
+    DISCOVERY: { count: 0, value: 0, expected: 0 },
+    PROPOSAL: { count: 0, value: 0, expected: 0 },
+    NEGOTIATION: { count: 0, value: 0, expected: 0 },
   };
 
   deals.forEach((deal) => {
@@ -180,25 +176,30 @@ export default async function ReportsPage({
       lostDeals++;
     } else {
       pipelineValue += deal.amount;
+      expectedPipelineValue += deal.expectedRevenue || 0;
+
+      if (deal.dealType === "NEW_BUSINESS") newBusinessValue += deal.amount;
+      if (deal.dealType === "EXISTING_BUSINESS")
+        existingBusinessValue += deal.amount;
+
       // Map active stages
       if (deal.stage in stages) {
         stages[deal.stage as keyof typeof stages].count++;
         stages[deal.stage as keyof typeof stages].value += deal.amount;
+        stages[deal.stage as keyof typeof stages].expected +=
+          deal.expectedRevenue || 0;
       }
     }
   });
 
-  // Calculate Win Rate (Won / Total Closed)
   const totalClosed = wonDeals + lostDeals;
   const winRate =
     totalClosed > 0 ? Math.round((wonDeals / totalClosed) * 100) : 0;
 
-  // Task Completion Rate
   const completedTasks = tasks.filter((t) => t.isCompleted).length;
   const taskCompletionRate =
     tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : 0;
 
-  // Find the highest value stage for the visual funnel scaling
   const maxStageValue = Math.max(
     ...Object.values(stages).map((s) => s.value),
     1,
@@ -207,24 +208,22 @@ export default async function ReportsPage({
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto w-full animate-in fade-in duration-500">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Sales Reports</h1>
+        <h1 className="text-2xl font-bold text-foreground">Sales Analytics</h1>
         <p className="text-sm text-slate-600">
-          Real-time analytics and pipeline health.
+          Real-time pipeline health and SFA forecasting.
         </p>
       </div>
 
-      {/* 🚨 THE UNIVERSAL FILTER COMPONENT */}
       <DataFilters
-        searchPlaceholder="Search deals, tasks, or contacts..."
+        searchPlaceholder="Search reports by keyword..."
         ownerOptions={ownerOptions}
       />
 
       {/* TOP KPIs GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 mt-2">
-        {/* Total Revenue */}
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-emerald-500/30">
           <p className="text-emerald-400 text-sm font-medium mb-1">
-            Total Closed Revenue
+            Closed Won Revenue
           </p>
           <p className="text-3xl font-bold text-white">
             ${totalRevenue.toLocaleString()}
@@ -234,20 +233,19 @@ export default async function ReportsPage({
           </p>
         </div>
 
-        {/* Active Pipeline */}
+        {/* 🚨 Upgraded Active Pipeline Card */}
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-blue-500/30">
           <p className="text-blue-400 text-sm font-medium mb-1">
-            Active Pipeline Value
+            Total Pipeline Value
           </p>
           <p className="text-3xl font-bold text-white">
             ${pipelineValue.toLocaleString()}
           </p>
-          <p className="text-xs text-slate-400 mt-2">
-            Potential future revenue
+          <p className="text-xs text-emerald-400 font-bold mt-2 bg-emerald-500/10 px-2 py-1 rounded inline-block">
+            Weighted: ${expectedPipelineValue.toLocaleString()}
           </p>
         </div>
 
-        {/* Win Rate */}
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 relative overflow-hidden">
           <div className="relative z-10">
             <p className="text-slate-400 text-sm font-medium mb-1">
@@ -258,7 +256,6 @@ export default async function ReportsPage({
               Against {lostDeals} lost deals
             </p>
           </div>
-          {/* Decorative background circle based on win rate */}
           <div
             className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-20"
             style={{
@@ -268,7 +265,6 @@ export default async function ReportsPage({
           />
         </div>
 
-        {/* Task Completion */}
         <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50">
           <p className="text-slate-400 text-sm font-medium mb-1">
             Task Completion
@@ -284,19 +280,20 @@ export default async function ReportsPage({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PIPELINE FUNNEL (CSS-Based Chart) */}
+        {/* 🚨 PIPELINE FUNNEL WITH FORECASTING */}
         <div className="lg:col-span-2 bg-[#242E3D] p-6 md:p-8 rounded-2xl shadow-lg border border-slate-700/50">
           <h3 className="text-lg font-bold text-white mb-6">
-            Pipeline Funnel by Value
+            Pipeline Funnel & Forecasting
           </h3>
 
           <div className="space-y-6">
             {Object.entries(stages).map(([stageName, data]) => {
-              // Calculate width percentage relative to the largest column
               const widthPct =
                 data.value > 0
                   ? Math.max((data.value / maxStageValue) * 100, 5)
                   : 0;
+              const expectedWidthPct =
+                data.value > 0 ? (data.expected / data.value) * 100 : 0;
 
               return (
                 <div key={stageName}>
@@ -306,15 +303,24 @@ export default async function ReportsPage({
                     </span>
                     <span className="text-sm font-bold text-blue-400">
                       ${data.value.toLocaleString()}
+                      <span className="text-xs text-emerald-400/80 font-medium ml-2">
+                        (Exp: ${data.expected.toLocaleString()})
+                      </span>
                     </span>
                   </div>
+                  {/* Outer Bar: Total Value */}
                   <div className="w-full bg-[#1E2532] h-6 rounded-md overflow-hidden relative">
                     <div
-                      className="h-full bg-blue-600/80 rounded-md transition-all duration-1000 flex items-center px-2"
+                      className="h-full bg-blue-600/50 rounded-md transition-all duration-1000 relative"
                       style={{ width: `${widthPct}%` }}
                     >
+                      {/* Inner Bar: Expected Value (Weighted) */}
+                      <div
+                        className="absolute left-0 top-0 h-full bg-blue-500 rounded-md"
+                        style={{ width: `${expectedWidthPct}%` }}
+                      />
                       {data.count > 0 && (
-                        <span className="text-[10px] text-white/90 font-medium">
+                        <span className="absolute left-2 top-[3px] text-[10px] text-white font-medium z-10">
                           {data.count} deals
                         </span>
                       )}
@@ -326,21 +332,43 @@ export default async function ReportsPage({
           </div>
         </div>
 
-        {/* QUICK STATS SIDEBAR */}
+        {/* SFA QUICK STATS SIDEBAR */}
         <div className="bg-[#242E3D] p-6 md:p-8 rounded-2xl shadow-lg border border-slate-700/50 flex flex-col gap-6">
-          <h3 className="text-lg font-bold text-white">Database Health</h3>
+          <h3 className="text-lg font-bold text-white">Deal Analytics</h3>
 
-          <div className="bg-[#1E2532] p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
-            <span className="text-slate-400 text-sm">Total CRM Contacts</span>
-            <span className="text-xl font-bold text-white">{clients}</span>
+          {/* New vs Existing Breakdown */}
+          <div className="space-y-3 mb-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">New Business</span>
+              <span className="font-bold text-white">
+                ${newBusinessValue.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full bg-[#1E2532] h-1.5 rounded-full overflow-hidden">
+              <div
+                className="bg-purple-500 h-full"
+                style={{
+                  width: `${pipelineValue ? (newBusinessValue / pipelineValue) * 100 : 0}%`,
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-sm pt-2">
+              <span className="text-slate-400">Existing (Upsell)</span>
+              <span className="font-bold text-white">
+                ${existingBusinessValue.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full bg-[#1E2532] h-1.5 rounded-full overflow-hidden">
+              <div
+                className="bg-orange-500 h-full"
+                style={{
+                  width: `${pipelineValue ? (existingBusinessValue / pipelineValue) * 100 : 0}%`,
+                }}
+              />
+            </div>
           </div>
 
-          <div className="bg-[#1E2532] p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
-            <span className="text-slate-400 text-sm">Total Deals Tracked</span>
-            <span className="text-xl font-bold text-white">{deals.length}</span>
-          </div>
-
-          <div className="bg-[#1E2532] p-4 rounded-xl border border-slate-700/50 flex items-center justify-between">
+          <div className="bg-[#1E2532] p-4 rounded-xl border border-slate-700/50 flex items-center justify-between mt-auto">
             <span className="text-slate-400 text-sm">Avg. Deal Size</span>
             <span className="text-xl font-bold text-emerald-400">
               $

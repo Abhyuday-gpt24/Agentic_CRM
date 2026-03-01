@@ -7,7 +7,7 @@ import { prisma } from "../../lib/prisma";
 import MetricCard from "../components/metric_card";
 import RecentDeals from "../components/recent_deals";
 import UpcomingTasks from "../components/upcoming_tasks";
-import { User, Prisma } from "@prisma/client";
+import { User } from "@prisma/client";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
 
 // ==========================================
@@ -20,16 +20,15 @@ type AuthUserWithTeam = Omit<User, "organizationId"> & {
 };
 
 async function getDashboardData(dbUser: AuthUserWithTeam) {
-  // 🚨 1. Get the dynamic ownership filter from our central utility
   const ownershipFilter = getSecureOwnershipFilter(dbUser);
 
-  // 🚨 2. Execute both queries simultaneously for maximum performance
   return await Promise.all([
     prisma.deal.findMany({
       where: {
         organizationId: dbUser.organizationId,
-        ...ownershipFilter, // Instantly secures the deals query
+        ...ownershipFilter,
       },
+      // 🚨 Ensure we grab the company details for the RecentDeals component
       include: { company: { select: { name: true } } },
       orderBy: { updatedAt: "desc" },
     }),
@@ -37,8 +36,8 @@ async function getDashboardData(dbUser: AuthUserWithTeam) {
     prisma.task.findMany({
       where: {
         organizationId: dbUser.organizationId,
-        isCompleted: false, // Dashboard only cares about pending tasks
-        ...ownershipFilter, // Instantly secures the tasks query
+        isCompleted: false,
+        ...ownershipFilter,
       },
       include: {
         contact: { select: { name: true } },
@@ -57,7 +56,6 @@ export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
-  // Fetch User & Team (Required for Manager RBAC)
   const dbUser = await prisma.user.findUnique({
     where: { email: session.user.email },
     include: { teamMembers: true },
@@ -65,17 +63,24 @@ export default async function DashboardPage() {
 
   if (!dbUser || !dbUser.organizationId) redirect("/setup");
 
-  // Cast to strict type
   const authUser = dbUser as AuthUserWithTeam;
 
-  // Fetch securely filtered data
   const [deals, tasks] = await getDashboardData(authUser);
 
-  // Business Logic Calculations
+  // 🚨 SFA Business Logic Calculations
   const activeDeals = deals.filter(
     (d) => d.stage !== "WON" && d.stage !== "LOST",
   );
+
+  // Total Unweighted Pipeline
   const pipelineValue = activeDeals.reduce((sum, deal) => sum + deal.amount, 0);
+
+  // Total Weighted Pipeline (Expected Revenue based on Probability)
+  const expectedPipelineValue = activeDeals.reduce(
+    (sum, deal) => sum + (deal.expectedRevenue || 0),
+    0,
+  );
+
   const wonDeals = deals.filter((d) => d.stage === "WON");
   const revenueValue = wonDeals.reduce((sum, deal) => sum + deal.amount, 0);
 
@@ -89,11 +94,11 @@ export default async function DashboardPage() {
       {/* DASHBOARD HEADER */}
       <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl  font-bold mb-1 text-foreground">
+          <h1 className="text-3xl font-bold mb-1 text-foreground">
             {greeting}, {firstName}.
           </h1>
-          <p className=" text-slate-600">
-            Here is what is happening in your workspace today.
+          <p className="text-slate-600">
+            Here is your daily pipeline and task overview.
           </p>
         </div>
         <div className="flex gap-3">
@@ -112,12 +117,12 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* METRICS SECTION */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      {/* 🚨 METRICS SECTION (Upgraded to 4 columns to include Expected Revenue!) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
         <MetricCard
-          title="Active Pipeline"
+          title="Total Pipeline"
           value={`$${pipelineValue.toLocaleString()}`}
-          subtext={`Across ${activeDeals.length} open opportunities`}
+          subtext={`${activeDeals.length} open opportunities`}
           icon={
             <svg
               className="w-6 h-6 text-blue-400"
@@ -135,13 +140,33 @@ export default async function DashboardPage() {
           }
         />
         <MetricCard
-          title="Closed Won Revenue"
-          value={`$${revenueValue.toLocaleString()}`}
+          title="Weighted Forecast"
+          value={`$${expectedPipelineValue.toLocaleString()}`}
           valueColor="text-emerald-400"
-          subtext={`From ${wonDeals.length} successful deals`}
+          subtext="Probability-adjusted revenue"
           icon={
             <svg
               className="w-6 h-6 text-emerald-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+              />
+            </svg>
+          }
+        />
+        <MetricCard
+          title="Closed Won Revenue"
+          value={`$${revenueValue.toLocaleString()}`}
+          subtext={`From ${wonDeals.length} successful deals`}
+          icon={
+            <svg
+              className="w-6 h-6 text-slate-300"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -178,7 +203,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* LISTS SECTION */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
         <RecentDeals deals={activeDeals.slice(0, 5)} />
         <UpcomingTasks tasks={tasks} />
       </div>
