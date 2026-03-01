@@ -103,11 +103,17 @@ export default async function ProductsPage() {
                     </td>
 
                     {canEditProducts && (
-                      <td className="px-6 py-6 flex gap-3">
+                      <td className="px-6 py-4 flex items-center gap-4">
+                        <Link
+                          href={`/products/${product.id}/edit`}
+                          className="text-blue-400 hover:text-blue-300 transition text-sm font-medium"
+                        >
+                          Edit
+                        </Link>
                         <form action={deleteAction}>
                           <button
                             type="submit"
-                            className="text-red-400 hover:text-red-300 transition"
+                            className="text-red-400 hover:text-red-300 transition text-sm font-medium"
                           >
                             Delete
                           </button>

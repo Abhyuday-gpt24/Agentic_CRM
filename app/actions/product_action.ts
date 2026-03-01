@@ -95,3 +95,34 @@ export async function deleteProduct(id: string) {
 
   revalidatePath("/products");
 }
+
+// Add this to the bottom of your actions/product_action.ts file
+
+export async function updateProduct(id: string, formData: FormData) {
+  const dbUser = await getAuthenticatedUser();
+
+  // 🚨 RBAC check ensures product belongs to org AND user has role permissions
+  await verifyProductAccess(dbUser, id);
+
+  const name = formData.get("name") as string;
+  const description = formData.get("description") as string;
+  const price = parseFloat(formData.get("price") as string);
+  const sku = formData.get("sku") as string;
+
+  // Checkboxes in FormData return "on" if checked, or null if unchecked
+  const isActive = formData.get("isActive") === "on";
+
+  await prisma.product.update({
+    where: { id: id },
+    data: {
+      name,
+      description: description || null,
+      price,
+      sku: sku || null,
+      isActive,
+    },
+  });
+
+  revalidatePath("/products");
+  redirect("/products");
+}

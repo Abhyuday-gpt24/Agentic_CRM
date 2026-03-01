@@ -159,3 +159,30 @@ export async function deleteDeal(dealId: string) {
   revalidatePath("/pipeline");
   revalidatePath("/dashboard");
 }
+
+// Add this to the bottom of actions/deals_action.ts
+
+export async function updateDeal(dealId: string, formData: FormData) {
+  const dbUser = await getAuthenticatedUser();
+  await verifyDealAccess(dealId, dbUser);
+
+  const name = formData.get("name") as string;
+  const stage = formData.get("stage") as DealStage;
+  const closeDateString = formData.get("closeDate") as string;
+
+  // Convert HTML date string (YYYY-MM-DD) to a JS Date object safely
+  const closeDate = closeDateString ? new Date(closeDateString) : null;
+
+  await prisma.deal.update({
+    where: { id: dealId },
+    data: {
+      name,
+      stage,
+      closeDate,
+    },
+  });
+
+  revalidatePath("/pipeline");
+  revalidatePath(`/pipeline/${dealId}/edit`);
+  redirect("/pipeline");
+}
