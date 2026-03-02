@@ -73,6 +73,7 @@ export function useAuth() {
       redirect: false, // Prevents automatic reload so you can handle errors
       email: email,
       otp: otp,
+      password: password,
     });
 
     if (verifyRes?.error) {
