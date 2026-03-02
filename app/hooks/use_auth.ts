@@ -85,20 +85,6 @@ export function useAuth() {
       handleRouting();
     }
 
-    // 2. Create Account
-    const registerRes = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
-    });
-
-    if (!registerRes.ok) {
-      const data = await registerRes.json();
-      setError(data.message || "Signup failed");
-      setLoading(false);
-      return;
-    }
-
     // 3. Auto-Login
     await signIn("credentials", { email, password, redirect: false });
     handleRouting();
