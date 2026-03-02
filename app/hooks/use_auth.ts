@@ -69,16 +69,19 @@ export function useAuth() {
     setError("");
 
     // 1. Verify OTP
-    const verifyRes = await fetch("/api/auth/verify_otp", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, otp }),
+    const verifyRes = await signIn("credentials", {
+      redirect: false, // Prevents automatic reload so you can handle errors
+      email: email,
+      otp: otp,
     });
 
-    if (!verifyRes.ok) {
+    if (verifyRes?.error) {
       setError("Invalid or expired OTP");
       setLoading(false);
       return;
+    } else {
+      console.log("OTP verified successfully for:", email);
+      handleRouting();
     }
 
     // 2. Create Account

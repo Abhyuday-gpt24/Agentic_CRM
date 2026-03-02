@@ -186,9 +186,7 @@ export default function Header({ user }: HeaderProps) {
                 <div className="my-1 border-t border-slate-700/50"></div>
 
                 <button
-                  onClick={() => {
-                    window.location.href = "/api/auth/signout";
-                  }}
+                  onClick={() => signOut({ callbackUrl: "/", redirect: true })}
                   className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
                 >
                   <svg
