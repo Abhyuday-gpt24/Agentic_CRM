@@ -8,6 +8,8 @@ import { redirect } from "next/navigation";
 import { ContactType, LeadSource, LeadStatus, User } from "@prisma/client";
 // 🚨 Import the centralized type
 import { AuthUserWithTeam } from "../lib/rbac_helpers";
+import { isValidEmail } from "../utils/validation";
+import { is } from "zod/locales";
 
 // ==========================================
 // SECURITY HELPERS

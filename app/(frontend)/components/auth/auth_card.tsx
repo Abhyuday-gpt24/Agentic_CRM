@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useAuth } from "../../../hooks/use_auth";
+import { LoadingSpinner } from "../loading_spinner";
 
 type FlowState = "LOGIN_PASSWORD" | "LOGIN_OTP" | "SIGNUP" | "VERIFY_SIGNUP";
 
@@ -70,6 +71,7 @@ export function AuthCard() {
             type="email"
             placeholder="Email Address"
             value={email}
+            required
             onChange={(e) => setEmail(e.target.value)}
             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
           />
@@ -88,8 +90,9 @@ export function AuthCard() {
             <button
               onClick={() => loginWithPassword(email, password)}
               disabled={loading}
-              className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-all shadow-md disabled:opacity-50"
+              className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <LoadingSpinner />}
               {loading ? "Authenticating..." : "Sign In"}
             </button>
             <button
@@ -106,8 +109,9 @@ export function AuthCard() {
             <button
               onClick={() => handleSendOtp("LOGIN_OTP")}
               disabled={loading}
-              className="w-full py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all disabled:opacity-50"
+              className="w-full py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <LoadingSpinner />}
               {loading ? "Sending..." : "Send Login Code"}
             </button>
             <input
@@ -120,8 +124,9 @@ export function AuthCard() {
             <button
               onClick={() => loginWithOtp(email, otp)}
               disabled={loading}
-              className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-all shadow-md disabled:opacity-50"
+              className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <LoadingSpinner />}
               {loading ? "Verifying..." : "Verify & Login"}
             </button>
             <button
@@ -153,8 +158,9 @@ export function AuthCard() {
             <button
               onClick={() => handleSendOtp("VERIFY_SIGNUP")}
               disabled={loading}
-              className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-all shadow-md disabled:opacity-50"
+              className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <LoadingSpinner />}
               {loading ? "Sending OTP..." : "Continue with OTP"}
             </button>
           </>
@@ -175,8 +181,9 @@ export function AuthCard() {
             <button
               onClick={() => registerWithOtp(name, email, password, otp)}
               disabled={loading}
-              className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-all shadow-md disabled:opacity-50"
+              className="w-full py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
+              {loading && <LoadingSpinner />}
               {loading ? "Creating Account..." : "Verify & Create Account"}
             </button>
             <button

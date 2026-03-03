@@ -1,6 +1,25 @@
 "use client";
 
+import { useFormStatus } from "react-dom";
 import { createOrganization } from "../../../actions/org_setup";
+import { LoadingSpinner } from "../loading_spinner";
+
+// 🚨 1. Create a dedicated Submit Button component to track the form's pending state
+// 🚨 2. Submit Button now uses the clean <LoadingSpinner /> component
+function SubmitButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+    >
+      {pending && <LoadingSpinner />}
+      {pending ? "Creating Workspace..." : "Create Workspace"}
+    </button>
+  );
+}
 
 export default function OrgSetup() {
   return (
@@ -94,12 +113,7 @@ export default function OrgSetup() {
           />
         </div>
 
-        <button
-          type="submit"
-          className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-[0.98]"
-        >
-          Create Workspace
-        </button>
+        <SubmitButton />
       </form>
     </div>
   );

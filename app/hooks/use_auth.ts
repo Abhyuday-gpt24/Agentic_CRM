@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { isValidEmail } from "../utils/validation";
 
 export function useAuth() {
   const router = useRouter();
@@ -13,6 +14,10 @@ export function useAuth() {
   };
 
   const loginWithPassword = async (email: string, password: string) => {
+    if (!isValidEmail(email)) {
+      setError("Invalid email address");
+      return;
+    }
     setLoading(true);
     setError("");
     const res = await signIn("credentials", {
@@ -30,6 +35,10 @@ export function useAuth() {
   };
 
   const loginWithOtp = async (email: string, otp: string) => {
+    if (!isValidEmail(email)) {
+      setError("Invalid email address");
+      return;
+    }
     setLoading(true);
     setError("");
     const res = await signIn("credentials", { redirect: false, email, otp });
@@ -42,6 +51,10 @@ export function useAuth() {
   };
 
   const sendOtp = async (email: string) => {
+    if (!isValidEmail(email)) {
+      setError("Invalid email address");
+      return;
+    }
     setLoading(true);
     setError("");
     const res = await fetch("/api/auth/send_otp", {
@@ -65,6 +78,10 @@ export function useAuth() {
     password: string,
     otp: string,
   ) => {
+    if (!isValidEmail(email)) {
+      setError("Invalid email address");
+      return;
+    }
     setLoading(true);
     setError("");
 
