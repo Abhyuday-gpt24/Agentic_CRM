@@ -20,9 +20,14 @@ type AuthUserWithTeam = Omit<User, "organizationId"> & {
 export default async function NewDealPage({
   searchParams,
 }: {
-  searchParams: Promise<{ companyId?: string; clientId?: string }>;
+  searchParams: Promise<{
+    companyId?: string;
+    clientId?: string;
+    returnTo?: string;
+  }>;
 }) {
-  const { companyId, clientId } = await searchParams;
+  const { companyId, clientId, returnTo } = await searchParams;
+  const targetRoute = returnTo ? returnTo : "/pipeline";
 
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
@@ -38,18 +43,18 @@ export default async function NewDealPage({
   const authUser = dbUser as AuthUserWithTeam;
 
   // 🚨 1. Determine Assignable Users for Delegation (Admin/Manager Logic)
-  let assignableUsers: { id: string; name: string }[] = [];
+  let assignableUsers: { id: string; name?: string }[] = [];
 
   if (authUser.role === "ADMIN") {
     // Admins can assign to anyone in the entire organization
     const allUsers = await prisma.user.findMany({
       where: { organizationId: authUser.organizationId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     });
     assignableUsers = allUsers.map((u) => ({
       id: u.id,
-      name: u.name || "Unknown User",
+      name: u.name || u.email || "Unknown User",
     }));
   } else if (authUser.role === "MANAGER") {
     // Managers can assign to themselves or their specific team members
@@ -57,7 +62,7 @@ export default async function NewDealPage({
       { id: authUser.id, name: "Me (Self)" },
       ...authUser.teamMembers.map((u) => ({
         id: u.id,
-        name: u.name || "Unknown User",
+        name: u.name || u.email || "Unknown User",
       })),
     ];
   }
@@ -97,7 +102,7 @@ export default async function NewDealPage({
     <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
-          href="/pipeline"
+          href={targetRoute}
           className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
         >
           <svg
@@ -127,6 +132,7 @@ export default async function NewDealPage({
           // 🚨 PASSING DELEGATION PROPS
           assignableUsers={assignableUsers}
           currentUserId={authUser.id}
+          returnTo={targetRoute}
         />
       </div>
     </div>

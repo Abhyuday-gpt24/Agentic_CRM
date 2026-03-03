@@ -143,13 +143,13 @@ export default function CompanyCard({ company, canEdit }: CompanyCardProps) {
       {/* Quick Action Links */}
       <div className="flex gap-4 pt-4 mt-auto border-t border-slate-700/50">
         <Link
-          href={`/contacts/new?companyId=${company.id}`}
+          href={`/contacts/new?companyId=${company.id}&returnTo=/companies`}
           className="text-xs font-medium text-slate-400 hover:text-blue-400 transition flex items-center gap-1"
         >
           + Contact
         </Link>
         <Link
-          href={`/pipeline/new?companyId=${company.id}`}
+          href={`/pipeline/new?companyId=${company.id}&returnTo=/companies`}
           className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition flex items-center gap-1"
         >
           + Deal

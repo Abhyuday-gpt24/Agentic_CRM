@@ -74,6 +74,7 @@ export function useAuth() {
       email: email,
       otp: otp,
       password: password,
+      name: name, // Pass the name to create the user if OTP is valid
     });
 
     if (verifyRes?.error) {

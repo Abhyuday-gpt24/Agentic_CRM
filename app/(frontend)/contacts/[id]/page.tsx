@@ -122,7 +122,7 @@ export default async function ContactDetailsPage({
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-white">Pending Tasks</h3>
               <Link
-                href="/tasks/new"
+                href={`/tasks/new?returnTo=/contacts/${contact.id}`}
                 className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded transition"
               >
                 + Add
@@ -157,7 +157,7 @@ export default async function ContactDetailsPage({
             <div className="flex justify-between items-center mb-4">
               <h3 className="font-bold text-white">Associated Deals</h3>
               <Link
-                href={`/pipeline/new?clientId=${contact.id}${contact.companyId ? `&companyId=${contact.companyId}` : ""}`}
+                href={`/pipeline/new?clientId=${contact.id}${contact.companyId ? `&companyId=${contact.companyId}` : ""}&returnTo=/contacts/${contact.id}`}
                 className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition"
               >
                 + New Deal

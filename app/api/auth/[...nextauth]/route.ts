@@ -19,6 +19,7 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
         otp: { label: "OTP", type: "text" },
+        name: { label: "Name", type: "text" },
       },
       async authorize(credentials) {
         console.log("Login attempt for:", credentials?.email);
@@ -53,9 +54,13 @@ export const authOptions: NextAuthOptions = {
           // Upsert the user and save the hashed password if they are new
           const user = await prisma.user.upsert({
             where: { email: credentials.email },
-            update: {}, // Do nothing if user already exists
+            update: {
+              // Optional: If they somehow already exist without a name, this adds it
+              ...(credentials.name && { name: credentials.name }),
+            },
             create: {
               email: credentials.email,
+              name: credentials.name,
               // Only attach the password field if a password was provided
               ...(hashedPassword && { password: hashedPassword }),
             },

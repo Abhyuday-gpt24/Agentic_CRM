@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "../../api/auth/[...nextauth]/route";
 import { prisma } from "../../lib/prisma";
 import Link from "next/link";
-import ContactCard from "./contact_card";
+import ContactCard from "./components/contact_card";
 import { User, Prisma, ContactType } from "@prisma/client";
 import DataFilters, { FilterConfig } from "../components/data_filters";
 import { getSecureOwnershipFilter } from "../../lib/rbac_helpers";
@@ -132,8 +132,12 @@ export default async function ContactsPage({
     type?: string;
     dateRange?: string;
     ownerId?: string;
+    companyId?: string;
+    returnTo?: string;
   }>;
 }) {
+  const { companyId, returnTo } = await searchParams;
+  const targetRoute = returnTo;
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
@@ -268,6 +272,7 @@ export default async function ContactsPage({
                   key={contact.id}
                   contact={contact}
                   canEdit={canEdit}
+                  returnTo={targetRoute}
                 />
               );
             })}

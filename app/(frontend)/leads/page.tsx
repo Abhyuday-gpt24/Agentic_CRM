@@ -243,7 +243,7 @@ export default async function LeadsPage({
           </p>
         </div>
         <Link
-          href="/contacts/new"
+          href="/contacts/new?returnTo=/leads&type=LEAD"
           className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition active:scale-95 shadow-lg shadow-blue-500/20"
         >
           + Add Lead

@@ -73,7 +73,7 @@ async function verifyContactAccess(
 // INTERNAL HELPER TO PARSE SFA FORM DATA
 // ==========================================
 function extractSfaFields(formData: FormData) {
-  const firstName = (formData.get("firstName") as string) || null;
+  const firstName = (formData.get("firstName") as string) || ""; // Required
   const lastName = (formData.get("lastName") as string) || ""; // Required
   // Auto-generate the legacy 'name' field for backward compatibility
   const name = [firstName, lastName].filter(Boolean).join(" ");
@@ -122,6 +122,9 @@ export async function createContact(formData: FormData) {
   const dbUser = await getAuthenticatedUser();
   const data = extractSfaFields(formData);
 
+  // 🚨 NEW: Extract the dynamic return path we passed from the form
+  const returnTo = formData.get("returnTo") as string | null;
+
   // 🚨 1. Determine Ownership (Lead Routing Logic)
   let targetEmployeeId = dbUser.id; // Default to the person creating it
   const requestedOwnerId = formData.get("employeeId") as string;
@@ -149,17 +152,23 @@ export async function createContact(formData: FormData) {
     data: {
       ...data,
       status: "ACTIVE",
-      employeeId: targetEmployeeId, // 🚨 Uses the safely resolved Owner ID
+      employeeId: targetEmployeeId, // Uses the safely resolved Owner ID
       organizationId: dbUser.organizationId,
     },
   });
 
-  // Redirect based on the type created
-  if (data.type === "LEAD") {
-    revalidatePath("/leads");
+  // 🚨 2. Revalidate Caches & Redirect
+  // It is safest to invalidate both caches so the new record appears instantly
+  // regardless of which dashboard the user navigates to next.
+  revalidatePath("/leads");
+  revalidatePath("/contacts");
+
+  // Dynamically route the user, falling back to defaults if needed
+  if (returnTo) {
+    redirect(returnTo);
+  } else if (data.type === "LEAD") {
     redirect("/leads");
   } else {
-    revalidatePath("/contacts");
     redirect("/contacts");
   }
 }
@@ -200,12 +209,19 @@ export async function updateContact(id: string, formData: FormData) {
       employeeId: targetEmployeeId, // 🚨 Apply the safely resolved Owner ID
     },
   });
+  const returnTo = formData.get("returnTo") as string | null;
+  const type = formData.get("type") as string; // Assuming you have type in your form data
 
-  if (data.type === "LEAD") {
-    revalidatePath("/leads");
+  // Revalidate both caches
+  revalidatePath("/leads");
+  revalidatePath("/contacts");
+
+  // 🚨 Dynamically route the user!
+  if (returnTo) {
+    redirect(returnTo);
+  } else if (type === "LEAD") {
     redirect("/leads");
   } else {
-    revalidatePath("/contacts");
     redirect("/contacts");
   }
 }

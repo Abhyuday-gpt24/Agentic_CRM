@@ -1,16 +1,21 @@
 import React from "react";
 import Link from "next/link";
 import { Contact, ContactType } from "@prisma/client";
-import { deleteContact } from "../../actions/contact_action";
+import { deleteContact } from "../../../actions/contact_action";
 
 type ContactCardProps = {
   contact: Contact & {
     companyRecord: { name: string } | null;
   };
   canEdit: boolean;
+  returnTo?: string;
 };
 
-export default function ContactCard({ contact, canEdit }: ContactCardProps) {
+export default function ContactCard({
+  contact,
+  canEdit,
+  returnTo,
+}: ContactCardProps) {
   const deleteAction = deleteContact.bind(null, contact.id);
 
   return (
@@ -32,7 +37,10 @@ export default function ContactCard({ contact, canEdit }: ContactCardProps) {
       {/* 🚨 THE FIX: Added pr-16 to push the badge away from the corner! */}
       <div className="flex justify-between items-start pr-16">
         <div>
-          <Link href={`/contacts/${contact.id}`}>
+          <Link
+            href={`/contacts/${contact.id}?returnTo=${returnTo || "/contacts"}`}
+            className="hover:underline"
+          >
             <h3 className="text-lg font-bold hover:text-blue-400 text-white">
               {contact.name}
             </h3>
@@ -69,7 +77,7 @@ export default function ContactCard({ contact, canEdit }: ContactCardProps) {
       {/* Quick Actions Footer */}
       <div className="pt-4 mt-auto border-t border-slate-700/50 flex gap-4 items-center">
         <Link
-          href={`/contacts/${contact.id}/edit`}
+          href={`/contacts/${contact.id}/edit?returnTo=${returnTo || "/contacts"}`}
           className="text-xs font-medium text-slate-400 hover:text-white transition"
         >
           Edit Details
@@ -77,7 +85,7 @@ export default function ContactCard({ contact, canEdit }: ContactCardProps) {
 
         {/* Instantly jump to a new deal for this specific person */}
         <Link
-          href={`/pipeline/new?clientId=${contact.id}${contact.companyId ? `&companyId=${contact.companyId}` : ""}`}
+          href={`/pipeline/new?clientId=${contact.id}${contact.companyId ? `&companyId=${contact.companyId}` : ""} &returnTo=${returnTo || "/contacts"}`}
           className="text-xs font-medium text-slate-400 hover:text-emerald-400 transition flex items-center gap-1 ml-auto"
         >
           + Add Deal

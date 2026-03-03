@@ -103,13 +103,13 @@ export default async function DashboardPage() {
         </div>
         <div className="flex gap-3">
           <Link
-            href="/tasks/new"
+            href="/tasks/new?returnTo=/dashboard"
             className="bg-[#242E3D] text-slate-300 border border-slate-700 hover:bg-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition active:scale-95"
           >
             + Task
           </Link>
           <Link
-            href="/pipeline/new"
+            href="/pipeline/new?returnTo=/dashboard"
             className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-500/20 active:scale-95"
           >
             + New Deal

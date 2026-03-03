@@ -13,7 +13,12 @@ type AuthUserWithTeam = Omit<User, "organizationId"> & {
   teamMembers: User[];
 };
 
-export default async function NewTaskPage() {
+export default async function NewTaskPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ returnTo?: string }>;
+}) {
+  const { returnTo } = await searchParams;
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) redirect("/");
 
@@ -42,19 +47,19 @@ export default async function NewTaskPage() {
   if (authUser.role === "ADMIN") {
     const allUsers = await prisma.user.findMany({
       where: { organizationId: authUser.organizationId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     });
     assignableUsers = allUsers.map((u) => ({
       id: u.id,
-      name: u.name || "Unknown User",
+      name: u.name || u.email || "Unknown User",
     }));
   } else if (authUser.role === "MANAGER") {
     assignableUsers = [
       { id: authUser.id, name: "Me (Self)" },
       ...authUser.teamMembers.map((u) => ({
         id: u.id,
-        name: u.name || "Unknown User",
+        name: u.name || u.email || "Unknown User",
       })),
     ];
   }
@@ -63,7 +68,7 @@ export default async function NewTaskPage() {
     <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
-          href="/tasks"
+          href={returnTo || "/tasks"}
           className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
         >
           <svg
@@ -193,7 +198,7 @@ export default async function NewTaskPage() {
 
           <div className="pt-4 flex justify-end gap-3 border-t border-slate-700/50">
             <Link
-              href="/tasks"
+              href={returnTo || "/tasks"}
               className="px-6 py-2.5 rounded-lg font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition"
             >
               Cancel

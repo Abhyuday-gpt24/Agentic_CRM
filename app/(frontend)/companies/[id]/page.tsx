@@ -77,7 +77,7 @@ export default async function CompanyViewPage({
 
   if (!company) {
     return (
-      <div className="p-8 text-center text-slate-400">
+      <div className="p-8 text-center text-slate-600">
         {"Account not found or you don't have permission to view it."}
       </div>
     );
@@ -127,7 +127,9 @@ export default async function CompanyViewPage({
 
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-white">{company.name}</h1>
+              <h1 className="text-2xl font-bold text-foreground">
+                {company.name}
+              </h1>
 
               {/* 🚨 New SFA Fields: Ticker & Account Type */}
               {company.tickerSymbol && (
@@ -220,7 +222,7 @@ export default async function CompanyViewPage({
               Contacts at {company.name}
             </h3>
             <Link
-              href={`/contacts/new?companyId=${company.id}`}
+              href={`/contacts/new?companyId=${company.id}&returnTo=/companies/${company.id}`}
               className="text-xs text-blue-400 hover:text-blue-300 transition"
             >
               + Add Contact
@@ -235,7 +237,7 @@ export default async function CompanyViewPage({
             <div className="space-y-3">
               {company.contacts.map((client) => (
                 <Link
-                  href={`/contacts/${client.id}`}
+                  href={`/contacts/${client.id}?returnTo=/companies/${company.id}`}
                   key={client.id}
                   className="block bg-[#1E2532] border border-slate-700 p-4 rounded-xl hover:border-blue-500/50 transition group"
                 >
@@ -269,7 +271,7 @@ export default async function CompanyViewPage({
               Deals & Opportunities
             </h3>
             <Link
-              href={`/pipeline/new?companyId=${company.id}`}
+              href={`/pipeline/new?companyId=${company.id}&returnTo=/companies/${company.id}`}
               className="text-xs text-blue-400 hover:text-blue-300 transition"
             >
               + Add Deal
@@ -288,7 +290,7 @@ export default async function CompanyViewPage({
 
                 return (
                   <Link
-                    href={`/pipeline/${deal.id}/edit`}
+                    href={`/pipeline/${deal.id}/edit?returnTo=/companies/${company.id}`}
                     key={deal.id}
                     className="block bg-[#1E2532] border border-slate-700 p-4 rounded-xl hover:border-blue-500/50 transition group"
                   >

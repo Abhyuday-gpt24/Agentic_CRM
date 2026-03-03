@@ -201,6 +201,9 @@ export async function updateDeal(dealId: string, formData: FormData) {
   const dbUser = await getAuthenticatedUser();
   const deal = await verifyDealAccess(dealId, dbUser);
 
+  // 🚨 Grab the dynamic return path we passed from the form
+  const returnTo = formData.get("returnTo") as string | null;
+
   const name = formData.get("name") as string;
   const stage = formData.get("stage") as DealStage;
   const closeDateString = formData.get("closeDate") as string;
@@ -247,11 +250,20 @@ export async function updateDeal(dealId: string, formData: FormData) {
       expectedRevenue,
       dealType: rawDealType ? (rawDealType as DealType) : null,
       nextStep,
-      employeeId: targetEmployeeId, // 🚨 Apply reassignment
+      employeeId: targetEmployeeId, // Apply reassignment
     },
   });
 
+  // Revalidate caches so the updated data shows immediately
   revalidatePath("/pipeline");
   revalidatePath(`/pipeline/${dealId}/edit`);
-  redirect("/pipeline");
+  // Revalidate the companies route just in case they navigated from a company card
+  revalidatePath("/companies");
+
+  // 🚨 Dynamically route the user!
+  if (returnTo) {
+    redirect(returnTo);
+  } else {
+    redirect("/pipeline");
+  }
 }

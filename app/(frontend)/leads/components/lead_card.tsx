@@ -48,9 +48,7 @@ export default function LeadCard({
     <div className="bg-[#242E3D] p-6 rounded-2xl shadow-lg border border-slate-700/50 flex flex-col gap-4 group hover:border-slate-600 transition-colors">
       <div className="flex justify-between items-start gap-4">
         <div className="flex-1 truncate">
-          <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors truncate">
-            {lead.name}
-          </h3>
+          <h3 className="text-lg font-bold text-white ">{lead.name}</h3>
           <p className="text-sm font-medium text-slate-300 truncate mt-0.5">
             {lead.jobTitle ? `${lead.jobTitle} at ` : ""}
             {companyDisplay}
@@ -84,7 +82,7 @@ export default function LeadCard({
         {/* 🚨 Grouped Edit and Delete together on the left */}
         <div className="flex items-center gap-4">
           <Link
-            href={`/contacts/${lead.id}/edit`}
+            href={`/contacts/${lead.id}/edit?returnTo=/leads`}
             className="text-xs font-medium text-slate-400 hover:text-blue-400 transition"
           >
             Edit

@@ -18,11 +18,11 @@ type AuthUserWithTeam = Omit<User, "organizationId"> & {
 };
 
 export default async function EditContactPage({
-  params,
+  searchParams,
 }: {
-  params: Promise<{ id: string }>;
+  searchParams: Promise<{ id: string; returnTo?: string }>;
 }) {
-  const { id } = await params;
+  const { id, returnTo } = await searchParams;
 
   // 1. Authenticate
   const session = await getServerSession(authOptions);
@@ -58,6 +58,12 @@ export default async function EditContactPage({
     );
   }
 
+  const targetRoute = returnTo
+    ? returnTo
+    : contact.type === "LEAD"
+      ? "/leads"
+      : "/contacts";
+
   // 4. Fetch companies for the organization (Shared resource)
   const companies = await prisma.company.findMany({
     where: { organizationId: authUser.organizationId },
@@ -70,19 +76,19 @@ export default async function EditContactPage({
   if (authUser.role === "ADMIN") {
     const allUsers = await prisma.user.findMany({
       where: { organizationId: authUser.organizationId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true },
       orderBy: { name: "asc" },
     });
     assignableUsers = allUsers.map((u) => ({
       id: u.id,
-      name: u.name || "Unknown User",
+      name: u.name || u.email || "Unknown User",
     }));
   } else if (authUser.role === "MANAGER") {
     assignableUsers = [
       { id: authUser.id, name: "Me (Self)" },
       ...authUser.teamMembers.map((u) => ({
         id: u.id,
-        name: u.name || "Unknown User",
+        name: u.name || u.email || "Unknown User",
       })),
     ];
   }
@@ -94,7 +100,7 @@ export default async function EditContactPage({
     <div className="p-6 md:p-8 max-w-4xl mx-auto w-full animate-in fade-in duration-500">
       <div className="flex items-center gap-4 mb-6">
         <Link
-          href="/contacts"
+          href={targetRoute}
           className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition"
           title="Go Back"
         >
@@ -119,6 +125,10 @@ export default async function EditContactPage({
 
       <div className="bg-[#242E3D] rounded-2xl shadow-lg border border-slate-700/50 p-6 md:p-8">
         <form action={updateContactWithId} className="space-y-8">
+          <input type="hidden" name="id" value={contact.id} />
+
+          {/* 🚨 Add this new hidden input so the server action can read it */}
+          <input type="hidden" name="returnTo" value={targetRoute} />
           {/* SECTION 1: Core Identity */}
           <div>
             <h2 className="text-lg font-semibold text-white mb-4 border-b border-slate-700/50 pb-2">
@@ -556,7 +566,7 @@ export default async function EditContactPage({
           {/* SUBMIT BUTTON */}
           <div className="pt-4 flex justify-end gap-3 border-t border-slate-700/50">
             <Link
-              href="/contacts"
+              href={targetRoute}
               className="px-6 py-2.5 rounded-lg font-medium text-slate-300 hover:text-white hover:bg-slate-700 transition"
             >
               Cancel
